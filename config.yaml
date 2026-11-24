@@ -1,0 +1,151 @@
+model_list:
+    -
+        model_name: gemini-4-hydrogen-low
+        litellm_params:
+            model: gemini/gemini-4-hydrogen
+            api_key: os.environ/GEMINI_API_KEY
+            reasoning_effort: low
+        model_info:
+            reasoning_effort_levels: [ "low" ]
+    -
+        model_name: gemini-4-hydrogen-medium
+        litellm_params:
+            model: gemini/gemini-4-hydrogen
+            api_key: os.environ/GEMINI_API_KEY
+            reasoning_effort: medium
+        model_info:
+            reasoning_effort_levels: [ "medium" ]
+    -
+        model_name: gemini-4-hydrogen-high
+        litellm_params:
+            model: gemini/gemini-4-hydrogen
+            api_key: os.environ/GEMINI_API_KEY
+            reasoning_effort: high
+        model_info:
+            reasoning_effort_levels: [ "high" ]
+    -
+        model_name: claude-haiku-5-5-low
+        litellm_params:
+            model: anthropic/claude-haiku-5-5
+            api_key: os.environ/ANTHROPIC_API_KEY
+            reasoning_effort: low
+        model_info:
+            reasoning_effort_levels: [ "low" ]
+    -
+        model_name: claude-haiku-5-5-medium
+        litellm_params:
+            model: anthropic/claude-haiku-5-5
+            api_key: os.environ/ANTHROPIC_API_KEY
+            reasoning_effort: medium
+        model_info:
+            reasoning_effort_levels: [ "medium" ]
+    -
+        model_name: claude-haiku-5-5-high
+        litellm_params:
+            model: anthropic/claude-haiku-5-5
+            api_key: os.environ/ANTHROPIC_API_KEY
+            reasoning_effort: high
+        model_info:
+            reasoning_effort_levels: [ "high" ]
+    -
+        model_name: claude-sonnet-5-5-low
+        litellm_params:
+            model: anthropic/claude-sonnet-5-5
+            api_key: os.environ/ANTHROPIC_API_KEY
+            reasoning_effort: low
+        model_info:
+            reasoning_effort_levels: [ "low" ]
+    -
+        model_name: claude-sonnet-5-5-medium
+        litellm_params:
+            model: anthropic/claude-sonnet-5-5
+            api_key: os.environ/ANTHROPIC_API_KEY
+            reasoning_effort: medium
+        model_info:
+            reasoning_effort_levels: [ "medium" ]
+    -
+        model_name: claude-sonnet-5-5-high
+        litellm_params:
+            model: anthropic/claude-sonnet-5-5
+            api_key: os.environ/ANTHROPIC_API_KEY
+            reasoning_effort: high
+        model_info:
+            reasoning_effort_levels: [ "high" ]
+    -
+        model_name: claude-opus-5-5-low
+        litellm_params:
+            model: anthropic/claude-opus-5-5
+            api_key: os.environ/ANTHROPIC_API_KEY
+            reasoning_effort: low
+        model_info:
+            reasoning_effort_levels: [ "low" ]
+    -
+        model_name: claude-opus-5-5-medium
+        litellm_params:
+            model: anthropic/claude-opus-5-5
+            api_key: os.environ/ANTHROPIC_API_KEY
+            reasoning_effort: medium
+        model_info:
+            reasoning_effort_levels: [ "medium" ]
+    -
+        model_name: claude-opus-5-5-high
+        litellm_params:
+            model: anthropic/claude-opus-5-5
+            api_key: os.environ/ANTHROPIC_API_KEY
+            reasoning_effort: high
+        model_info:
+            reasoning_effort_levels: [ "high" ]
+    -
+        model_name: gemini-decision-1
+        litellm_params:
+            model: hosted_vllm/gemini-decision-1
+            api_base: http://gemini-decision-adapter:8080
+            api_key: dummy
+        model_info:
+            mode: decisions
+            max_input_tokens: 262144
+    -
+        model_name: anthropic-ladder
+        litellm_params:
+            model: auto_router/complexity_router
+            complexity_router_default_model: claude-sonnet-5-5-low
+            complexity_router_config:
+                tiers:
+                    SIMPLE: claude-haiku-5-5-low
+                    MEDIUM: claude-sonnet-5-5-low
+                    COMPLEX: claude-sonnet-5-5-medium
+                    REASONING: claude-opus-5-5-low
+                classifier_type: oss_classifier
+                opensource_classifier_config:
+                    deployment_name: gemini-decision-1
+                    timeout_ms: 30000
+                classifier_fallback: heuristic
+                classifier_context_window_size: 3
+                escalation_keywords: [ "!LITELLM_ESCALATE" ]
+                session_affinity: false
+    -
+        model_name: gemini-ladder
+        litellm_params:
+            model: auto_router/complexity_router
+            complexity_router_default_model: gemini-4-hydrogen-low
+            complexity_router_config:
+                tiers:
+                    SIMPLE: gemini-4-hydrogen-low
+                    MEDIUM: gemini-4-hydrogen-low
+                    COMPLEX: gemini-4-hydrogen-medium
+                    REASONING: gemini-4-hydrogen-high
+                classifier_type: oss_classifier
+                opensource_classifier_config:
+                    deployment_name: gemini-decision-1
+                    timeout_ms: 30000
+                classifier_fallback: heuristic
+                classifier_context_window_size: 3
+                escalation_keywords: [ "!LITELLM_ESCALATE" ]
+                session_affinity: false
+litellm_settings:
+    drop_params: true
+    callbacks: custom_callbacks.proxy_handler_instance
+general_settings:
+    master_key: os.environ/LITELLM_MASTER_KEY
+    store_model_in_db: true
+    store_prompts_in_spend_logs: true

@@ -1,0 +1,54 @@
+services:
+    litellm:
+        image: ghcr.io/berriai/litellm:main-stable
+        command: [ "--config", "/app/config.yaml", "--port", "4000" ]
+        ports:
+            - "127.0.0.1:4000:4000"
+        volumes:
+            - ./config.yaml:/app/config.yaml:ro
+            - ./custom_callbacks.py:/app/custom_callbacks.py:ro
+        env_file:
+            - .env
+        environment:
+            DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+        extra_hosts:
+            - "host.docker.internal:host-gateway"
+        depends_on:
+            db:
+                condition: service_healthy
+            gemini-decision-adapter:
+                condition: service_healthy
+        restart: unless-stopped
+
+    gemini-decision-adapter:
+        build:
+            context: .
+            dockerfile: Dockerfile.adapter
+        volumes:
+            - ./gemini_decision_adapter.py:/app/gemini_decision_adapter.py:ro
+        env_file:
+            - .env
+        healthcheck:
+            test: [ "CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health')" ]
+            interval: 10s
+            timeout: 5s
+            retries: 5
+        restart: unless-stopped
+
+    db:
+        image: postgres:16-alpine
+        environment:
+            POSTGRES_USER: ${POSTGRES_USER}
+            POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+            POSTGRES_DB: ${POSTGRES_DB}
+        volumes:
+            - litellm-db:/var/lib/postgresql/data
+        healthcheck:
+            test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}" ]
+            interval: 5s
+            timeout: 5s
+            retries: 10
+        restart: unless-stopped
+
+volumes:
+    litellm-db:
