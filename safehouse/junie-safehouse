@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+exec "$HOME/.homebrew/bin/safehouse" \
+    --enable=docker \
+    --add-dirs="$HOME/.junie:$HOME/.mcp-auth" \
+    --add-dirs-ro="$HOME/.local/bin:$HOME/.local/share/junie:$HOME/Applications/PhpStorm.app:$HOME/mcp-servers" \
+    --append-profile="$HOME/.config/safehouse/junie-local.sb" \
+    --env-pass=LITELLM_MASTER_KEY \
+    "$HOME/.local/bin/junie" "$@"

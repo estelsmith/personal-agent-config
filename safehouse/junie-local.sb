@@ -1,0 +1,19 @@
+;; ---------------------------------------------------------------------------
+;; Machine-local Agent Safehouse appended profile for junie-safehouse-gemini-ladder
+;; Appended via: safehouse --append-profile="$HOME/.config/safehouse/junie-local.sb"
+;; ---------------------------------------------------------------------------
+
+;; Custom Homebrew prefix (~/.homebrew), npm global prefix (~/npm), and ~/bin
+(allow file-read-metadata
+    (home-literal "")
+    (home-literal "/.homebrew")
+    (home-literal "/npm")
+    (home-literal "/bin")
+)
+
+(allow file-read*
+    (home-subpath "/.homebrew")
+    (home-subpath "/npm")
+    (home-subpath "/bin")
+    (home-literal "/.gitignore_global")
+)
