@@ -11,6 +11,7 @@ Local [LiteLLM Proxy](https://docs.litellm.ai/) Docker Compose stack exposing co
 | `litellm-proxy/custom_callbacks.py` | `~/litellm-proxy/custom_callbacks.py` | Patches `GoogleGenAIGenerateContentHandler.get_structured_messages` for GenAI routing, pins Junie title/summary side-requests to `claude-haiku-5-5-low`, and stabilizes Junie capability-filter responses. |
 | `litellm-proxy/gemini_decision_adapter.py` | `~/litellm-proxy/gemini_decision_adapter.py` | Compatibility layer (Starlette ASGI sidecar) translating the unsupported Gemini Decisions API (`v1beta/decisions`) into the LiteLLM-supported `hosted_vllm` decisions API (`/v1/systemone`, `/v1/decisions`, `/decisions`), since LiteLLM does not natively support the Gemini Decisions API yet. |
 | `litellm-proxy/Dockerfile.adapter` | `~/litellm-proxy/Dockerfile.adapter` | Python 3.12 image (`starlette`, `uvicorn`, `httpx`) for running `gemini-decision-adapter` on port `8080`. |
+| `litellm-proxy/.env.example` | `~/litellm-proxy/.env.example` | Template `.env` file containing the required proxy master key and provider API keys. |
 
 ## Installation
 
@@ -27,15 +28,16 @@ install -m 644 \
   ~/litellm-proxy/
 ```
 
-2. Create `~/litellm-proxy/.env` with the required API keys and database credentials:
+2. Copy `litellm-proxy/.env.example` to `~/litellm-proxy/.env` and fill in the required keys:
+
+```bash
+install -m 600 litellm-proxy/.env.example ~/litellm-proxy/.env
+```
 
 ```dotenv
-LITELLM_MASTER_KEY=sk-your-master-key
+LITELLM_MASTER_KEY=sk-local-change-me
 ANTHROPIC_API_KEY=sk-ant-...
 GEMINI_API_KEY=...
-POSTGRES_USER=litellm
-POSTGRES_PASSWORD=litellm
-POSTGRES_DB=litellm
 ```
 
 3. Build and start the stack:
