@@ -17,7 +17,7 @@ Checks configuration sync and health across all discovered systems (or only the 
 Installs missing or mismatched files and runs system lifecycle hooks:
 
 - Installs missing `sync` files and atomically updates files whose SHA-256 hash or permissions differ.
-- Seeds missing `seed` files (such as `.env.example` -> `~/litellm-proxy/.env`) while preserving existing local files.
+- Seeds missing `seed` files (such as `.env.example` -> `~/litellm-proxy/.env`) while preserving existing local files; `sync-or-seed` (`<primary>|<seed>`) syncs the primary file (such as a gitignored `.env`) when present in the repo and falls back to seeding from `<seed>` when absent.
 - Runs `<system>/hooks/pre-install` (before file sync) and `<system>/hooks/post-install` (after file sync, e.g., `litellm-proxy` syncing `LITELLM_MASTER_KEY` into `~/.bash_profile` and pulling/building/restarting the Docker Compose stack when files changed, or checking stack health and only starting it if stopped or unhealthy when unchanged).
 - Prints a per-system summary report.
 
@@ -35,9 +35,9 @@ Any top-level directory `<system>/` containing a `manifest` file or a `hooks/` d
 1. Add `<system>/manifest` with one mapping per line:
 
    ```text
-   # <mode> <source> <target> [sync|seed]
-   0644 my-config.json ~/.config/my-agent/config.json
-   0600 .env.example   ~/.config/my-agent/.env        seed
+   # <mode> <source> <target> [sync|seed|sync-or-seed]
+   0644 my-config.json    ~/.config/my-agent/config.json
+   0600 .env|.env.example ~/.config/my-agent/.env        sync-or-seed
    ```
 
 2. Optionally add executable hook scripts under `<system>/hooks/`:

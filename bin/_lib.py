@@ -151,14 +151,14 @@ def parse_manifest(system: System) -> list[ManifestEntry]:
             continue
         if len(tokens) not in (3, 4):
             raise ValueError(
-                f"{system.manifest_path}:{lineno}: expected '<mode> <source> <target> [sync|seed]', got {len(tokens)} fields"
+                f"{system.manifest_path}:{lineno}: expected '<mode> <source> <target> [sync|seed|sync-or-seed]', got {len(tokens)} fields"
             )
 
-        mode_str, rel_source, raw_target = tokens[0], tokens[1], tokens[2]
+        mode_str, raw_source, raw_target = tokens[0], tokens[1], tokens[2]
         kind = tokens[3] if len(tokens) == 4 else "sync"
-        if kind not in ("sync", "seed"):
+        if kind not in ("sync", "seed", "sync-or-seed"):
             raise ValueError(
-                f"{system.manifest_path}:{lineno}: invalid kind '{kind}' (expected 'sync' or 'seed')"
+                f"{system.manifest_path}:{lineno}: invalid kind '{kind}' (expected 'sync', 'seed', or 'sync-or-seed')"
             )
 
         try:
@@ -172,12 +172,42 @@ def parse_manifest(system: System) -> list[ManifestEntry]:
                 f"{system.manifest_path}:{lineno}: mode '{mode_str}' out of range 0000..0777"
             )
 
-        source = (system.path / rel_source).resolve()
         system_root = system.path.resolve()
-        if source != system_root and system_root not in source.parents:
-            raise ValueError(
-                f"{system.manifest_path}:{lineno}: source '{rel_source}' escapes system directory"
-            )
+
+        def _resolve_source(rel: str) -> Path:
+            candidate = (system.path / rel).resolve()
+            if candidate != system_root and system_root not in candidate.parents:
+                raise ValueError(
+                    f"{system.manifest_path}:{lineno}: source '{rel}' escapes system directory"
+                )
+            return candidate
+
+        if kind == "sync-or-seed":
+            parts = raw_source.split("|")
+            if len(parts) != 2 or not parts[0] or not parts[1]:
+                raise ValueError(
+                    f"{system.manifest_path}:{lineno}: sync-or-seed source '{raw_source}' must be '<primary>|<seed>'"
+                )
+            primary_rel, seed_rel = parts
+            primary_source = _resolve_source(primary_rel)
+            seed_source = _resolve_source(seed_rel)
+            primary_unexpanded = system.path / primary_rel
+            if primary_unexpanded.exists() or primary_unexpanded.is_symlink():
+                rel_source = primary_rel
+                source = primary_source
+                resolved_kind = "sync"
+            else:
+                rel_source = seed_rel
+                source = seed_source
+                resolved_kind = "seed"
+        else:
+            if "|" in raw_source:
+                raise ValueError(
+                    f"{system.manifest_path}:{lineno}: '|' source syntax requires kind 'sync-or-seed'"
+                )
+            rel_source = raw_source
+            source = _resolve_source(rel_source)
+            resolved_kind = kind
 
         expanded_target = os.path.expanduser(os.path.expandvars(raw_target))
         target = Path(expanded_target)
@@ -191,7 +221,7 @@ def parse_manifest(system: System) -> list[ManifestEntry]:
                 mode=mode,
                 source=source,
                 target=target,
-                kind=kind,
+                kind=resolved_kind,
                 rel_source=f"{system.name}/{rel_source}",
                 raw_target=raw_target,
             )

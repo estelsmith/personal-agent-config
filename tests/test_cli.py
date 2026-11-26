@@ -124,6 +124,29 @@ sys.exit(0)
             text=True,
         )
 
+    def _make_isolated_repo(self, *, repo_env_content: str | None = None) -> Path:
+        repo = self.tmp / "repo"
+        shutil.copytree(
+            REPO_ROOT / "bin",
+            repo / "bin",
+            ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+        )
+        shutil.copytree(
+            REPO_ROOT / "litellm-proxy",
+            repo / "litellm-proxy",
+            ignore=shutil.ignore_patterns(".env", "__pycache__", "*.pyc"),
+        )
+        shutil.copytree(
+            REPO_ROOT / "safehouse",
+            repo / "safehouse",
+            ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+        )
+        if repo_env_content is not None:
+            env_path = repo / "litellm-proxy" / ".env"
+            env_path.write_text(repo_env_content, encoding="utf-8")
+            env_path.chmod(0o600)
+        return repo
+
     def test_list_and_unknown_system(self) -> None:
         res = self._run(BIN_DOCTOR, ["--list"])
         self.assertEqual(res.returncode, 0, res.stderr)
@@ -135,15 +158,18 @@ sys.exit(0)
 
     def test_litellm_install_doctor_and_drift_repair(self) -> None:
         self._install_fake_docker()
+        repo = self._make_isolated_repo(repo_env_content=None)
+        bin_doctor = repo / "bin" / "doctor"
+        bin_install = repo / "bin" / "install"
 
         # Before install, doctor fails on missing files.
-        pre = self._run(BIN_DOCTOR, ["litellm-proxy"])
+        pre = self._run(bin_doctor, ["litellm-proxy"])
         self.assertEqual(pre.returncode, 1)
         self.assertIn("missing: ~/litellm-proxy/config.yaml", pre.stdout)
 
         # Dry run must not write files or invoke docker.
         self.docker_log.unlink(missing_ok=True)
-        dry = self._run(BIN_INSTALL, ["--dry-run", "litellm-proxy"])
+        dry = self._run(bin_install, ["--dry-run", "litellm-proxy"])
         self.assertEqual(dry.returncode, 0, dry.stdout + dry.stderr)
         self.assertFalse((self.home / "litellm-proxy").exists())
         self.assertFalse((self.home / ".bash_profile").exists())
@@ -151,7 +177,7 @@ sys.exit(0)
         self.assertIn("hook=dry-run", dry.stdout)
 
         # Real install creates files, seeds .env (0600), syncs ~/.bash_profile, and runs compose workflow.
-        inst = self._run(BIN_INSTALL, ["litellm-proxy"])
+        inst = self._run(bin_install, ["litellm-proxy"])
         self.assertEqual(inst.returncode, 0, inst.stdout + inst.stderr)
         self.assertIn("installed=5", inst.stdout)
         self.assertIn("seeded=1", inst.stdout)
@@ -183,7 +209,7 @@ sys.exit(0)
         )
         env_file.write_text(custom_env, encoding="utf-8")
 
-        reinst = self._run(BIN_INSTALL, ["--no-hooks", "litellm-proxy"])
+        reinst = self._run(bin_install, ["--no-hooks", "litellm-proxy"])
         self.assertEqual(reinst.returncode, 0, reinst.stdout + reinst.stderr)
         self.assertEqual(env_file.read_text(encoding="utf-8"), custom_env)
         self.assertIn("seed exists, preserved", reinst.stdout)
@@ -197,7 +223,7 @@ sys.exit(0)
 
             # Doctor catches that ~/.bash_profile still has the old seed key.
             doc_stale = self._run(
-                BIN_DOCTOR,
+                bin_doctor,
                 ["litellm-proxy"],
                 extra_env={"LITELLM_HEALTH_URL": health_url},
             )
@@ -211,7 +237,7 @@ sys.exit(0)
             # ~/.bash_profile and skips docker compose pull/build/down/up.
             self.docker_log.unlink(missing_ok=True)
             sync_inst = self._run(
-                BIN_INSTALL,
+                bin_install,
                 ["litellm-proxy"],
                 extra_env={"LITELLM_HEALTH_URL": health_url},
             )
@@ -233,7 +259,7 @@ sys.exit(0)
             self.assertTrue(any("compose" in c and " ps" in c for c in unchanged_docker_cmds))
 
             doc_ok = self._run(
-                BIN_DOCTOR,
+                bin_doctor,
                 ["litellm-proxy"],
                 extra_env={"LITELLM_HEALTH_URL": health_url},
             )
@@ -247,7 +273,7 @@ sys.exit(0)
             cfg = self.home / "litellm-proxy" / "config.yaml"
             cfg.write_text("tampered: true\n", encoding="utf-8")
             doc_bad = self._run(
-                BIN_DOCTOR,
+                bin_doctor,
                 ["litellm-proxy"],
                 extra_env={"LITELLM_HEALTH_URL": health_url},
             )
@@ -255,12 +281,12 @@ sys.exit(0)
             self.assertIn("sha256 mismatch: ~/litellm-proxy/config.yaml", doc_bad.stdout)
 
             # Repair via bin/install --no-hooks and re-check.
-            repair = self._run(BIN_INSTALL, ["--no-hooks", "litellm-proxy"])
+            repair = self._run(bin_install, ["--no-hooks", "litellm-proxy"])
             self.assertEqual(repair.returncode, 0)
             self.assertIn("updated=1", repair.stdout)
 
             doc_fixed = self._run(
-                BIN_DOCTOR,
+                bin_doctor,
                 ["litellm-proxy"],
                 extra_env={"LITELLM_HEALTH_URL": health_url},
             )
@@ -268,7 +294,7 @@ sys.exit(0)
 
             # Force reinstall marks files updated (FILES_CHANGED=1) and runs pull/build/down/up.
             self.docker_log.unlink(missing_ok=True)
-            forced = self._run(BIN_INSTALL, ["--force", "litellm-proxy"])
+            forced = self._run(bin_install, ["--force", "litellm-proxy"])
             self.assertEqual(forced.returncode, 0, forced.stdout + forced.stderr)
             self.assertIn("updated=5", forced.stdout)
             forced_docker_cmds = self.docker_log.read_text(encoding="utf-8").splitlines()
@@ -290,7 +316,7 @@ sys.exit(0)
                 ]
             )
             doc_unhealthy = self._run(
-                BIN_DOCTOR,
+                bin_doctor,
                 ["litellm-proxy"],
                 extra_env={"LITELLM_HEALTH_URL": health_url},
             )
@@ -301,7 +327,7 @@ sys.exit(0)
             # pull/build/down but still runs `compose up -d --wait`.
             self.docker_log.unlink(missing_ok=True)
             unhealthy_inst = self._run(
-                BIN_INSTALL,
+                bin_install,
                 ["litellm-proxy"],
                 extra_env={"LITELLM_HEALTH_URL": health_url},
             )
@@ -317,7 +343,7 @@ sys.exit(0)
             self._install_fake_docker(containers=[])
             self.docker_log.unlink(missing_ok=True)
             stopped_inst = self._run(
-                BIN_INSTALL,
+                bin_install,
                 ["litellm-proxy"],
                 extra_env={"LITELLM_HEALTH_URL": health_url},
             )
@@ -335,7 +361,7 @@ sys.exit(0)
             server.shutdown()
             server.server_close()
             dead_http_inst = self._run(
-                BIN_INSTALL,
+                bin_install,
                 ["litellm-proxy"],
                 extra_env={"LITELLM_HEALTH_URL": health_url},
             )
@@ -421,6 +447,9 @@ sys.exit(0)
 
     def test_litellm_bash_profile_edge_cases(self) -> None:
         self._install_fake_docker()
+        repo = self._make_isolated_repo(repo_env_content=None)
+        bin_doctor = repo / "bin" / "doctor"
+        bin_install = repo / "bin" / "install"
         env_dir = self.home / "litellm-proxy"
         env_dir.mkdir(parents=True, exist_ok=True)
         env_file = env_dir / ".env"
@@ -450,11 +479,11 @@ sys.exit(0)
 
             # Install syncs all manifest files first, then adds export to ~/.bash_profile.
             # Run doctor before install to verify missing export detection (install manifest first).
-            pre_sync = self._run(BIN_INSTALL, ["--no-hooks", "litellm-proxy"])
+            pre_sync = self._run(bin_install, ["--no-hooks", "litellm-proxy"])
             self.assertEqual(pre_sync.returncode, 0, pre_sync.stdout + pre_sync.stderr)
 
             doc_missing = self._run(
-                BIN_DOCTOR,
+                bin_doctor,
                 ["litellm-proxy"],
                 extra_env={"LITELLM_HEALTH_URL": health_url},
             )
@@ -466,7 +495,7 @@ sys.exit(0)
 
             # Install appends export on a new line, preserving existing content and mode.
             inst_add = self._run(
-                BIN_INSTALL,
+                bin_install,
                 ["litellm-proxy"],
                 extra_env={"LITELLM_HEALTH_URL": health_url},
             )
@@ -483,7 +512,7 @@ sys.exit(0)
 
             # Second install reports already matches.
             inst_ok = self._run(
-                BIN_INSTALL,
+                bin_install,
                 ["litellm-proxy"],
                 extra_env={"LITELLM_HEALTH_URL": health_url},
             )
@@ -499,13 +528,13 @@ sys.exit(0)
                 encoding="utf-8",
             )
             doc_quoted = self._run(
-                BIN_DOCTOR,
+                bin_doctor,
                 ["litellm-proxy"],
                 extra_env={"LITELLM_HEALTH_URL": health_url},
             )
             self.assertEqual(doc_quoted.returncode, 0, doc_quoted.stdout + doc_quoted.stderr)
             inst_quoted = self._run(
-                BIN_INSTALL,
+                bin_install,
                 ["litellm-proxy"],
                 extra_env={"LITELLM_HEALTH_URL": health_url},
             )
@@ -524,14 +553,14 @@ sys.exit(0)
                 encoding="utf-8",
             )
             doc_dup = self._run(
-                BIN_DOCTOR,
+                bin_doctor,
                 ["litellm-proxy"],
                 extra_env={"LITELLM_HEALTH_URL": health_url},
             )
             self.assertEqual(doc_dup.returncode, 1)
 
             inst_dedup = self._run(
-                BIN_INSTALL,
+                bin_install,
                 ["litellm-proxy"],
                 extra_env={"LITELLM_HEALTH_URL": health_url},
             )
@@ -541,6 +570,117 @@ sys.exit(0)
                 bash_profile.read_text(encoding="utf-8"),
                 "export LITELLM_MASTER_KEY=sk-real-master\n"
                 "export PATH=\"$HOME/bin:$PATH\"\n",
+            )
+        finally:
+            server.shutdown()
+            server.server_close()
+
+    def test_litellm_repo_env_syncs_and_updates_bash_profile(self) -> None:
+        self._install_fake_docker()
+        initial_env = (
+            "LITELLM_MASTER_KEY=sk-initial-key\n"
+            "ANTHROPIC_API_KEY=sk-ant-real\n"
+            "GEMINI_API_KEY=real-gemini-key\n"
+        )
+        repo = self._make_isolated_repo(repo_env_content=initial_env)
+        bin_doctor = repo / "bin" / "doctor"
+        bin_install = repo / "bin" / "install"
+        repo_env = repo / "litellm-proxy" / ".env"
+
+        server = http.server.HTTPServer(("127.0.0.1", 0), _OkHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            health_url = f"http://127.0.0.1:{server.server_port}/health/liveliness"
+
+            # Initial install syncs repo litellm-proxy/.env (not .env.example) and updates ~/.bash_profile.
+            inst = self._run(
+                bin_install,
+                ["litellm-proxy"],
+                extra_env={"LITELLM_HEALTH_URL": health_url},
+            )
+            self.assertEqual(inst.returncode, 0, inst.stdout + inst.stderr)
+            self.assertIn("installed=6", inst.stdout)
+            self.assertIn("seeded=0", inst.stdout)
+            self.assertIn("[ADDED] ~/.bash_profile", inst.stdout)
+
+            target_env = self.home / "litellm-proxy" / ".env"
+            self.assertEqual(target_env.read_text(encoding="utf-8"), initial_env)
+            self.assertEqual(stat.S_IMODE(target_env.stat().st_mode), 0o600)
+            bash_profile = self.home / ".bash_profile"
+            self.assertEqual(
+                bash_profile.read_text(encoding="utf-8"),
+                "export LITELLM_MASTER_KEY=sk-initial-key\n",
+            )
+
+            doc_ok = self._run(
+                bin_doctor,
+                ["litellm-proxy"],
+                extra_env={"LITELLM_HEALTH_URL": health_url},
+            )
+            self.assertEqual(doc_ok.returncode, 0, doc_ok.stdout + doc_ok.stderr)
+
+            # Rotate LITELLM_MASTER_KEY in repo's litellm-proxy/.env.
+            rotated_env = (
+                "LITELLM_MASTER_KEY=sk-rotated-key\n"
+                "ANTHROPIC_API_KEY=sk-ant-real\n"
+                "GEMINI_API_KEY=real-gemini-key\n"
+            )
+            repo_env.write_text(rotated_env, encoding="utf-8")
+
+            # Doctor catches the sha256 mismatch on ~/litellm-proxy/.env.
+            doc_drift = self._run(
+                bin_doctor,
+                ["litellm-proxy"],
+                extra_env={"LITELLM_HEALTH_URL": health_url},
+            )
+            self.assertEqual(doc_drift.returncode, 1)
+            self.assertIn("sha256 mismatch: ~/litellm-proxy/.env", doc_drift.stdout)
+
+            # Install updates ~/litellm-proxy/.env, updates ~/.bash_profile, and restarts compose.
+            self.docker_log.unlink(missing_ok=True)
+            inst_rotate = self._run(
+                bin_install,
+                ["litellm-proxy"],
+                extra_env={"LITELLM_HEALTH_URL": health_url},
+            )
+            self.assertEqual(
+                inst_rotate.returncode, 0, inst_rotate.stdout + inst_rotate.stderr
+            )
+            self.assertIn("updated=1", inst_rotate.stdout)
+            self.assertIn("[UPDATED] ~/litellm-proxy/.env", inst_rotate.stdout)
+            self.assertIn("[UPDATED] ~/.bash_profile", inst_rotate.stdout)
+            self.assertNotIn("already matches", inst_rotate.stdout)
+            self.assertEqual(target_env.read_text(encoding="utf-8"), rotated_env)
+            self.assertEqual(
+                bash_profile.read_text(encoding="utf-8"),
+                "export LITELLM_MASTER_KEY=sk-rotated-key\n",
+            )
+            rotated_cmds = self.docker_log.read_text(encoding="utf-8").splitlines()
+            self.assertTrue(any("compose" in c and " down" in c for c in rotated_cmds))
+            self.assertTrue(
+                any("compose" in c and " up -d --wait" in c for c in rotated_cmds)
+            )
+
+            # Re-running install when nothing changed skips compose restart and reports already matches.
+            self.docker_log.unlink(missing_ok=True)
+            inst_noop = self._run(
+                bin_install,
+                ["litellm-proxy"],
+                extra_env={"LITELLM_HEALTH_URL": health_url},
+            )
+            self.assertEqual(
+                inst_noop.returncode, 0, inst_noop.stdout + inst_noop.stderr
+            )
+            self.assertIn("unchanged=6", inst_noop.stdout)
+            self.assertIn(
+                "[OK] ~/.bash_profile: export LITELLM_MASTER_KEY already matches",
+                inst_noop.stdout,
+            )
+            noop_cmds = self.docker_log.read_text(encoding="utf-8").splitlines()
+            self.assertFalse(any("compose" in c and " down" in c for c in noop_cmds))
+            self.assertFalse(
+                any("compose" in c and " up -d --wait" in c for c in noop_cmds)
             )
         finally:
             server.shutdown()
