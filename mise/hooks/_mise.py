@@ -12,6 +12,7 @@ import subprocess
 import tempfile
 import urllib.error
 import urllib.request
+from dataclasses import dataclass
 from pathlib import Path
 
 try:
@@ -27,18 +28,96 @@ _MISE_ACTIVATE_RE = re.compile(r"\bmise\s+activate\s+bash\b")
 _DIRENV_HOOK_RE = re.compile(r"\bdirenv\s+hook\s+bash\b")
 
 
-def parse_toml_tools(toml_path: Path) -> dict[str, str]:
-    """Read the [tools] table from a TOML file as {tool_name: version}."""
+@dataclass(frozen=True)
+class ToolSpec:
+    """Normalized global Mise tool specification from [tools]."""
+
+    version: str
+    options: tuple[tuple[str, str], ...] = ()
+
+    def to_cli_spec(self, tool: str) -> str:
+        if self.options:
+            opts = ",".join(f"{k}={v}" for k, v in self.options)
+            return f"{tool}[{opts}]@{self.version}"
+        return f"{tool}@{self.version}"
+
+
+def _normalize_tool_spec(raw: object) -> ToolSpec:
+    if isinstance(raw, dict):
+        version = str(raw.get("version", "")).strip()
+        opts: dict[str, str] = {}
+        for k, v in raw.items():
+            if k == "version":
+                continue
+            key = str(k).strip()
+            if not key:
+                continue
+            if isinstance(v, list):
+                val_str = ",".join(str(item).strip() for item in v if str(item).strip())
+            elif isinstance(v, bool):
+                val_str = "true" if v else "false"
+            elif key == "extras":
+                val_str = ",".join(part.strip() for part in str(v).split(",") if part.strip())
+            else:
+                val_str = str(v).strip()
+            if val_str:
+                opts[key] = val_str
+        return ToolSpec(version=version, options=tuple(sorted(opts.items())))
+    return ToolSpec(version=str(raw).strip())
+
+
+def _parse_fallback_toml_value(raw_val: str) -> object:
+    val = raw_val.strip()
+    if val.startswith("{") and val.endswith("}"):
+        inner = val[1:-1].strip()
+        table: dict[str, object] = {}
+        # Split on commas outside [...] brackets
+        parts: list[str] = []
+        buf: list[str] = []
+        depth = 0
+        for ch in inner:
+            if ch == "[":
+                depth += 1
+            elif ch == "]" and depth > 0:
+                depth -= 1
+            if ch == "," and depth == 0:
+                parts.append("".join(buf))
+                buf = []
+            else:
+                buf.append(ch)
+        if buf:
+            parts.append("".join(buf))
+        for part in parts:
+            if "=" not in part:
+                continue
+            tk, tv = part.split("=", 1)
+            tk = tk.strip().strip('"').strip("'")
+            tv = tv.strip()
+            if tv.startswith("[") and tv.endswith("]"):
+                items = [
+                    x.strip().strip('"').strip("'")
+                    for x in tv[1:-1].split(",")
+                    if x.strip().strip('"').strip("'")
+                ]
+                table[tk] = items
+            else:
+                table[tk] = tv.strip('"').strip("'")
+        return table
+    return val.strip('"').strip("'")
+
+
+def parse_toml_tools(toml_path: Path) -> dict[str, ToolSpec]:
+    """Read the [tools] table from a TOML file as {tool_name: ToolSpec}."""
     raw = toml_path.read_text(encoding="utf-8")
     if tomllib is not None:
         data = tomllib.loads(raw)
         tools = data.get("tools", {})
         if not isinstance(tools, dict):
             return {}
-        return {str(k): str(v) for k, v in tools.items()}
+        return {str(k): _normalize_tool_spec(v) for k, v in tools.items()}
 
     # Minimal fallback parser for [tools] section if tomllib is unavailable.
-    tools_out: dict[str, str] = {}
+    tools_out: dict[str, ToolSpec] = {}
     in_tools = False
     for line in raw.splitlines():
         stripped = line.strip()
@@ -50,13 +129,12 @@ def parse_toml_tools(toml_path: Path) -> dict[str, str]:
         if in_tools and "=" in stripped:
             key, val = stripped.split("=", 1)
             key = key.strip().strip('"').strip("'")
-            val = val.strip().strip('"').strip("'")
             if key:
-                tools_out[key] = val
+                tools_out[key] = _normalize_tool_spec(_parse_fallback_toml_value(val))
     return tools_out
 
 
-def load_desired_tools(system_dir: Path) -> dict[str, str]:
+def load_desired_tools(system_dir: Path) -> dict[str, ToolSpec]:
     """Load global tool specifications from mise/tools.toml."""
     tools_file = system_dir / "tools.toml"
     if not tools_file.is_file():
@@ -305,7 +383,7 @@ def _installed_versions_by_tool(mise_bin: Path, home: Path) -> tuple[bool, dict[
 def check_global_tools(
     mise_bin: Path,
     config_toml: Path,
-    desired_tools: dict[str, str],
+    desired_tools: dict[str, ToolSpec],
     home: Path,
 ) -> tuple[bool, list[str]]:
     """Verify global ~/.config/mise/config.toml has desired tools and mise reports them installed."""
@@ -317,14 +395,17 @@ def check_global_tools(
 
     configured = parse_toml_tools(config_toml)
     config_ok = True
-    for tool, expected_ver in desired_tools.items():
-        actual_ver = configured.get(tool)
-        if actual_ver is None:
-            messages.append(f"[FAIL] {config_toml} is missing global tool '{tool}' ({expected_ver})")
-            config_ok = False
-        elif actual_ver != expected_ver:
+    for tool, expected_spec in desired_tools.items():
+        actual_spec = configured.get(tool)
+        if actual_spec is None:
             messages.append(
-                f"[FAIL] {config_toml} global tool '{tool}' is '{actual_ver}', expected '{expected_ver}'"
+                f"[FAIL] {config_toml} is missing global tool '{tool}' ({expected_spec.to_cli_spec(tool)})"
+            )
+            config_ok = False
+        elif actual_spec != expected_spec:
+            messages.append(
+                f"[FAIL] {config_toml} global tool '{tool}' is "
+                f"'{actual_spec.to_cli_spec(tool)}', expected '{expected_spec.to_cli_spec(tool)}'"
             )
             config_ok = False
 
@@ -334,42 +415,68 @@ def check_global_tools(
         return False, messages
 
     install_ok = True
-    for tool, expected_ver in desired_tools.items():
+    for tool, expected_spec in desired_tools.items():
         entries = ls_data.get(tool, [])
         matched = [
             item
             for item in entries
             if isinstance(item, dict)
-            and str(item.get("requested_version", "")) == expected_ver
+            and str(item.get("requested_version", "")) == expected_spec.version
             and item.get("installed") is True
         ]
         if not matched:
             messages.append(
-                f"[FAIL] mise global tool '{tool}@{expected_ver}' is not installed (run bin/install mise)"
+                f"[FAIL] mise global tool '{expected_spec.to_cli_spec(tool)}' is not installed (run bin/install mise)"
             )
             install_ok = False
 
     if config_ok and install_ok:
-        summary = ", ".join(f"{k}@{v}" for k, v in desired_tools.items())
+        summary = ", ".join(spec.to_cli_spec(k) for k, spec in desired_tools.items())
         messages.append(f"[OK] Global mise tools configured and installed: {summary}")
         return True, messages
 
     return False, messages
 
 
+def _is_version_installed(ls_data: dict[str, list[dict]], tool: str, version: str) -> bool:
+    for item in ls_data.get(tool, []):
+        if (
+            isinstance(item, dict)
+            and str(item.get("requested_version", "")) == version
+            and item.get("installed") is True
+        ):
+            return True
+    return False
+
+
 def sync_global_tools(
     mise_bin: Path,
     config_toml: Path,
-    desired_tools: dict[str, str],
+    desired_tools: dict[str, ToolSpec],
     home: Path,
 ) -> tuple[bool, list[str]]:
     """Configure and install desired global tools via `mise use --global`."""
     already_ok, _ = check_global_tools(mise_bin, config_toml, desired_tools, home)
     if already_ok:
-        summary = ", ".join(f"{k}@{v}" for k, v in desired_tools.items())
+        summary = ", ".join(spec.to_cli_spec(k) for k, spec in desired_tools.items())
         return True, [f"[OK] Global mise tools already configured and installed: {summary}"]
 
-    specs = [f"{tool}@{version}" for tool, version in desired_tools.items()]
+    configured = parse_toml_tools(config_toml) if config_toml.is_file() else {}
+    ls_ok, ls_data, _ = _installed_versions_by_tool(mise_bin, home)
+
+    # `mise use --global` skips reinstalling when the target version is already on disk
+    # even if tool options (such as pipx extras) changed; force-reinstall those tools.
+    force_reinstall: list[str] = []
+    if ls_ok:
+        for tool, expected_spec in desired_tools.items():
+            actual_spec = configured.get(tool)
+            options_changed = (
+                actual_spec is not None and actual_spec.options != expected_spec.options
+            ) or (actual_spec is None and bool(expected_spec.options))
+            if options_changed and _is_version_installed(ls_data, tool, expected_spec.version):
+                force_reinstall.append(f"{tool}@{expected_spec.version}")
+
+    specs = [spec.to_cli_spec(tool) for tool, spec in desired_tools.items()]
     res = subprocess.run(
         [str(mise_bin), "use", "--global", *specs],
         cwd=str(home),
@@ -379,5 +486,20 @@ def sync_global_tools(
     if res.returncode != 0:
         err = res.stderr.strip() or res.stdout.strip() or f"exit {res.returncode}"
         return False, [f"[FAIL] mise use --global failed: {err}"]
+
+    if force_reinstall:
+        reinstall_res = subprocess.run(
+            [str(mise_bin), "install", "--force", *force_reinstall],
+            cwd=str(home),
+            capture_output=True,
+            text=True,
+        )
+        if reinstall_res.returncode != 0:
+            err = (
+                reinstall_res.stderr.strip()
+                or reinstall_res.stdout.strip()
+                or f"exit {reinstall_res.returncode}"
+            )
+            return False, [f"[FAIL] mise install --force failed: {err}"]
 
     return True, [f"[UPDATED] Configured and installed global mise tools: {', '.join(specs)}"]

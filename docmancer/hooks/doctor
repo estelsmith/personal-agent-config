@@ -5,9 +5,29 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import subprocess
 import sys
 from pathlib import Path
+
+
+def _read_shebang_interpreter(script_path: Path) -> str | None:
+    if not script_path.is_file():
+        return None
+    try:
+        with script_path.open("rb") as fh:
+            first_line = fh.readline(4096).decode("utf-8", errors="replace").strip()
+    except OSError:
+        return None
+    if not first_line.startswith("#!"):
+        return None
+    tokens = shlex.split(first_line[2:].strip())
+    if not tokens:
+        return None
+    interp = tokens[0]
+    if interp == "/usr/bin/env" and len(tokens) > 1:
+        return tokens[1]
+    return interp
 
 
 def main() -> int:
@@ -69,6 +89,41 @@ def main() -> int:
     else:
         ver = doc_res.stdout.strip().splitlines()[0] if doc_res.stdout.strip() else "unknown"
         print(f"[OK] mise exec -- docmancer ({ver})")
+
+        which_res = subprocess.run(
+            [str(mise_bin), "which", "docmancer"],
+            cwd=str(home),
+            capture_output=True,
+            text=True,
+        )
+        if which_res.returncode != 0 or not which_res.stdout.strip():
+            err = which_res.stderr.strip() or f"exit {which_res.returncode}"
+            print(f"[FAIL] mise which docmancer failed: {err}")
+            ok = False
+        else:
+            doc_bin = Path(which_res.stdout.strip().splitlines()[0])
+            interp = _read_shebang_interpreter(doc_bin)
+            if interp is None:
+                print(
+                    f"[FAIL] could not determine Python interpreter for {doc_bin} "
+                    "to verify 'embeddings-openai' extra"
+                )
+                ok = False
+            else:
+                imp_res = subprocess.run(
+                    [interp, "-c", "import openai"],
+                    cwd=str(home),
+                    capture_output=True,
+                    text=True,
+                )
+                if imp_res.returncode != 0:
+                    print(
+                        "[FAIL] docmancer is missing the 'embeddings-openai' extra "
+                        "(run bin/install mise or ~/bin/mise install --force pipx:docmancer)"
+                    )
+                    ok = False
+                else:
+                    print("[OK] docmancer embeddings-openai extra (openai) is installed")
 
     return 0 if ok else 1
 

@@ -1,4 +1,4 @@
 [tools]
-"pipx:docmancer" = "0.9.17"
+"pipx:docmancer" = { version = "0.9.17", extras = ["embeddings-openai"] }
 python = "3.15"
 uv = "0.13.10"

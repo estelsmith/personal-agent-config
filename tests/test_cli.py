@@ -859,6 +859,7 @@ sys.exit(0)
 import json
 import os
 import sys
+import tomllib
 from pathlib import Path
 
 log_file = Path({str(log_path)!r})
@@ -874,35 +875,85 @@ state_path = home / ".fake_mise_installed.json"
 def load_tools():
     if not cfg_path.is_file():
         return {{}}
-    tools = {{}}
-    in_tools = False
-    for line in cfg_path.read_text(encoding="utf-8").splitlines():
-        s = line.strip()
-        if not s or s.startswith("#"):
-            continue
-        if s.startswith("[") and s.endswith("]"):
-            in_tools = s[1:-1].strip() == "tools"
-            continue
-        if in_tools and "=" in s:
-            k, v = s.split("=", 1)
-            tools[k.strip().strip('"')] = v.strip().strip('"')
-    return tools
+    data = tomllib.loads(cfg_path.read_text(encoding="utf-8"))
+    out = {{}}
+    for k, v in data.get("tools", {{}}).items():
+        if isinstance(v, dict):
+            ver = str(v.get("version", ""))
+            opts = {{str(ok): (",".join(ov) if isinstance(ov, list) else str(ov)) for ok, ov in v.items() if ok != "version"}}
+            out[str(k)] = {{"version": ver, "options": opts}}
+        else:
+            out[str(k)] = {{"version": str(v), "options": {{}}}}
+    return out
+
+def write_tools(tools):
+    cfg_path.parent.mkdir(parents=True, exist_ok=True)
+    lines = ["[tools]"]
+    for k, spec in sorted(tools.items()):
+        key_fmt = f'"{{k}}"' if ":" in k else k
+        if spec["options"]:
+            opts_parts = [f'version = "{{spec["version"]}}"']
+            for ok, ov in sorted(spec["options"].items()):
+                opts_parts.append(f'{{ok}} = "{{ov}}"')
+            lines.append(f'{{key_fmt}} = {{{{ {{", ".join(opts_parts)}} }}}}')
+        else:
+            lines.append(f'{{key_fmt}} = "{{spec["version"]}}"')
+    cfg_path.write_text("\\n".join(lines) + "\\n", encoding="utf-8")
+
+def load_state():
+    if state_path.is_file():
+        return json.loads(state_path.read_text(encoding="utf-8"))
+    return {{"installed": {installed_tools!r}, "installed_tools": {{}}}}
+
+def save_state(state):
+    state_path.write_text(json.dumps(state), encoding="utf-8")
+
+def ensure_docmancer_bins(ver, extras):
+    base = home / ".local" / "share" / "mise" / "installs" / "pipx-docmancer" / ver
+    py_bin = base / "docmancer" / "bin" / "python"
+    doc_bin = base / "bin" / "docmancer"
+    marker = base / "extras.txt"
+    py_bin.parent.mkdir(parents=True, exist_ok=True)
+    doc_bin.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text(extras, encoding="utf-8")
+    py_bin.write_text(
+        f'''#!{{sys.executable}}
+import sys
+from pathlib import Path
+extras = Path({{str(marker)!r}}).read_text(encoding="utf-8").split(",")
+if len(sys.argv) >= 3 and sys.argv[1] == "-c" and "import openai" in sys.argv[2]:
+    if "embeddings-openai" in extras:
+        sys.exit(0)
+    print("ModuleNotFoundError: No module named 'openai'", file=sys.stderr)
+    sys.exit(1)
+sys.exit(0)
+''',
+        encoding="utf-8",
+    )
+    py_bin.chmod(0o755)
+    doc_bin.write_text(f"#!{{py_bin}}\\n", encoding="utf-8")
+    doc_bin.chmod(0o755)
+    return doc_bin
+
+def parse_cli_spec(spec):
+    name_part, ver = spec.rsplit("@", 1)
+    opts = {{}}
+    if "[" in name_part and name_part.endswith("]"):
+        name, opt_str = name_part[:-1].split("[", 1)
+        for item in opt_str.split(","):
+            if "=" in item:
+                ok, ov = item.split("=", 1)
+                opts[ok.strip()] = ov.strip()
+        return name, ver, opts
+    return name_part, ver, opts
 
 def load_conf_d_env():
     env_map = {{}}
     if conf_d.is_dir():
         for p in sorted(conf_d.glob("*.toml")):
-            in_env = False
-            for line in p.read_text(encoding="utf-8").splitlines():
-                s = line.strip()
-                if not s or s.startswith("#"):
-                    continue
-                if s.startswith("[") and s.endswith("]"):
-                    in_env = s[1:-1].strip() == "env"
-                    continue
-                if in_env and "=" in s:
-                    k, v = s.split("=", 1)
-                    env_map[k.strip().strip('"')] = v.strip().strip('"')
+            data = tomllib.loads(p.read_text(encoding="utf-8"))
+            for k, v in data.get("env", {{}}).items():
+                env_map[str(k)] = str(v)
     return env_map
 
 if args == ["--version"]:
@@ -911,31 +962,62 @@ if args == ["--version"]:
 
 if args[:2] == ["use", "--global"]:
     tools = load_tools()
+    state = load_state()
+    state["installed"] = True
+    inst_map = state.setdefault("installed_tools", {{}})
     for spec in args[2:]:
-        name, ver = spec.rsplit("@", 1)
-        tools[name] = ver
-    cfg_path.parent.mkdir(parents=True, exist_ok=True)
-    lines = ["[tools]"]
-    for k, v in sorted(tools.items()):
-        key_fmt = f'"{{k}}"' if ":" in k else k
-        lines.append(f'{{key_fmt}} = "{{v}}"')
-    cfg_path.write_text("\\n".join(lines) + "\\n", encoding="utf-8")
-    state_path.write_text(json.dumps({{"installed": True}}), encoding="utf-8")
+        name, ver, opts = parse_cli_spec(spec)
+        tools[name] = {{"version": ver, "options": opts}}
+        # Mimic real mise: only install if not already installed at that version.
+        if name not in inst_map or inst_map[name].get("version") != ver:
+            inst_map[name] = {{"version": ver, "extras": opts.get("extras", "")}}
+            if name == "pipx:docmancer":
+                ensure_docmancer_bins(ver, opts.get("extras", ""))
+    write_tools(tools)
+    save_state(state)
+    sys.exit(0)
+
+if args[:2] == ["install", "--force"]:
+    tools = load_tools()
+    state = load_state()
+    inst_map = state.setdefault("installed_tools", {{}})
+    for spec in args[2:]:
+        name, ver, _ = parse_cli_spec(spec)
+        cfg_spec = tools.get(name, {{"version": ver, "options": {{}}}})
+        extras = cfg_spec["options"].get("extras", "")
+        inst_map[name] = {{"version": cfg_spec["version"], "extras": extras}}
+        if name == "pipx:docmancer":
+            ensure_docmancer_bins(cfg_spec["version"], extras)
+    save_state(state)
     sys.exit(0)
 
 if args == ["ls", "--global", "--json"]:
     tools = load_tools()
-    is_installed = {installed_tools!r}
-    if state_path.is_file():
-        is_installed = json.loads(state_path.read_text(encoding="utf-8")).get("installed", is_installed)
+    state = load_state()
+    is_installed = state.get("installed", {installed_tools!r})
     out = {{}}
-    for name, ver in tools.items():
+    for name, spec in tools.items():
+        ver = spec["version"]
         out[name] = [{{"version": ver, "requested_version": ver, "installed": is_installed, "active": is_installed}}]
     print(json.dumps(out))
     sys.exit(0)
 
 if args == ["env", "--json"]:
     print(json.dumps(load_conf_d_env()))
+    sys.exit(0)
+
+if args == ["which", "docmancer"]:
+    tools = load_tools()
+    if "pipx:docmancer" not in tools:
+        print("docmancer not installed", file=sys.stderr)
+        sys.exit(1)
+    spec = tools["pipx:docmancer"]
+    ver = spec["version"]
+    state = load_state()
+    inst_info = state.get("installed_tools", {{}}).get("pipx:docmancer")
+    extras = inst_info["extras"] if inst_info else spec["options"].get("extras", "")
+    doc_bin = ensure_docmancer_bins(ver, extras)
+    print(str(doc_bin))
     sys.exit(0)
 
 if len(args) >= 3 and args[0] == "exec" and args[1] == "--":
@@ -1038,7 +1120,10 @@ sys.exit(0)
             cfg_text = cfg_toml.read_text(encoding="utf-8")
             self.assertIn('python = "3.15"', cfg_text)
             self.assertIn('uv = "0.13.10"', cfg_text)
-            self.assertIn('"pipx:docmancer" = "0.9.17"', cfg_text)
+            self.assertIn(
+                '"pipx:docmancer" = { version = "0.9.17", extras = "embeddings-openai" }',
+                cfg_text,
+            )
 
             # Doctor passes now.
             doc_ok = self._run(BIN_DOCTOR, ["mise"], extra_env=extra_env)
@@ -1053,6 +1138,41 @@ sys.exit(0)
             self.assertIn("already configured and installed", reinst.stdout)
             logged_cmds = mise_log.read_text(encoding="utf-8").splitlines()
             self.assertFalse(any(c.startswith("use --global") for c in logged_cmds))
+
+            # Simulating an older install without the embeddings-openai extra triggers forced reinstall.
+            cfg_toml.write_text(
+                '[tools]\n"pipx:docmancer" = "0.9.17"\npython = "3.15"\nuv = "0.13.10"\n',
+                encoding="utf-8",
+            )
+            state_path = self.home / ".fake_mise_installed.json"
+            state_path.write_text(
+                json.dumps(
+                    {
+                        "installed": True,
+                        "installed_tools": {
+                            "pipx:docmancer": {"version": "0.9.17", "extras": ""},
+                            "python": {"version": "3.15", "extras": ""},
+                            "uv": {"version": "0.13.10", "extras": ""},
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            doc_old = self._run(BIN_DOCTOR, ["mise"], extra_env=extra_env)
+            self.assertEqual(doc_old.returncode, 1)
+            self.assertIn("expected 'pipx:docmancer[extras=embeddings-openai]@0.9.17'", doc_old.stdout)
+
+            mise_log.unlink(missing_ok=True)
+            upgrade_inst = self._run(BIN_INSTALL, ["mise"], extra_env=extra_env)
+            self.assertEqual(upgrade_inst.returncode, 0, upgrade_inst.stdout + upgrade_inst.stderr)
+            upgrade_cmds = mise_log.read_text(encoding="utf-8").splitlines()
+            self.assertTrue(any(c.startswith("use --global") for c in upgrade_cmds))
+            self.assertTrue(
+                any(c == "install --force pipx:docmancer@0.9.17" for c in upgrade_cmds),
+                upgrade_cmds,
+            )
+            doc_after_upgrade = self._run(BIN_DOCTOR, ["mise"], extra_env=extra_env)
+            self.assertEqual(doc_after_upgrade.returncode, 0, doc_after_upgrade.stdout + doc_after_upgrade.stderr)
 
             # Removing mise activate from ~/.bash_profile makes doctor fail.
             bash_profile.write_text('eval "$(direnv hook bash)"\n', encoding="utf-8")
@@ -1100,16 +1220,26 @@ sys.exit(0)
         self.assertEqual(doc_before_tools.returncode, 1)
         self.assertIn("mise exec -- docmancer --version failed", doc_before_tools.stdout)
 
-        # Configure global tools (via fake mise) and confirm docmancer doctor passes.
+        # Configure global tools without embeddings-openai extra: doctor fails on missing openai.
         cfg_toml = self.home / ".config" / "mise" / "config.toml"
         cfg_toml.write_text(
             '[tools]\n"pipx:docmancer" = "0.9.17"\npython = "3.15"\nuv = "0.13.10"\n',
+            encoding="utf-8",
+        )
+        doc_missing_extra = self._run(BIN_DOCTOR, ["docmancer"])
+        self.assertEqual(doc_missing_extra.returncode, 1)
+        self.assertIn("missing the 'embeddings-openai' extra", doc_missing_extra.stdout)
+
+        # Configure global tools with embeddings-openai extra and confirm docmancer doctor passes.
+        cfg_toml.write_text(
+            '[tools]\n"pipx:docmancer" = { version = "0.9.17", extras = "embeddings-openai" }\npython = "3.15"\nuv = "0.13.10"\n',
             encoding="utf-8",
         )
         doc_ok = self._run(BIN_DOCTOR, ["docmancer"])
         self.assertEqual(doc_ok.returncode, 0, doc_ok.stdout + doc_ok.stderr)
         self.assertIn("OPENAI_BASE_URL=http://localhost:11434/v1", doc_ok.stdout)
         self.assertIn("[OK] mise exec -- docmancer (docmancer 0.9.17)", doc_ok.stdout)
+        self.assertIn("[OK] docmancer embeddings-openai extra (openai) is installed", doc_ok.stdout)
 
         # If conf.d env vars are removed, docmancer doctor detects the missing env vars.
         conf_d_path.write_text("[env]\n", encoding="utf-8")
