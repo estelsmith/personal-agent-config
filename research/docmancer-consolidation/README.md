@@ -103,54 +103,75 @@ Excluding `.estel-local/docs/digitalocean` (already globally indexed via `https:
 
 ---
 
-## 4. Next Steps (Staged Execution Plan)
+## 4. Next Steps (Repo-by-Repo Execution Plan)
 
-Work through global import first, then migrate repositories **one at a time** so each project can be verified before touching the next.
-
-### Step 1: Import Approved Sources Into Global Docmancer
+Work through one repository at a time, importing and verifying its missing docs in the global store before removing local Docmancer files or moving on to the next repository.
 
 - **Import strategy preference:** Always try `--strategy llms.txt` first when importing docs into the global store. Avoid `llms-full.txt` or other discovery strategies (such as `sitemap.xml` or `nav-crawl`) unless `llms.txt` is unavailable and another strategy is unavoidable for a specific source.
+- **Target the global config during pre-cleanup steps:** Because `microboat` and `microvm-web-hosting` still have a local `./docmancer.yaml`, pass `--config ~/.docmancer/docmancer.yaml` (or run from `personal-agent-config`) during Phases `1a` and `2a` so imports and verification queries hit the global database instead of the local one.
 
-1. Decide which candidate URLs above to keep globally (and whether to re-crawl `docs.boat.dev` / `docs.dagger.io` or skip them).
-2. From `personal-agent-config` (or any directory without a local `docmancer.yaml`), import each chosen source using `--strategy llms.txt` first:
-   ```bash
-   mise exec -- docmancer docs add --strategy llms.txt <url>
-   ```
-   Only fall back to another strategy (avoiding `llms-full.txt` unless unavoidable) if `--strategy llms.txt` is not available for that source.
-3. Verify global availability and retrieval:
-   ```bash
-   mise exec -- docmancer docs list
-   mise exec -- docmancer docs query "<library> <topic>" --budget 1200
-   ```
+### Actionable Next Steps Summary
 
-### Step 2: Clean Up `microboat` First & Verify
+| Phase | Target Repo | Action | Concrete Steps / Files / URLs | Verification Gate Before Proceeding |
+| --- | --- | --- | --- | --- |
+| 1a | `~/repositories/personal/microboat` | Import missing docs globally | Try `mise exec -- docmancer docs add --strategy llms.txt <url>` first (avoid `llms-full.txt` unless unavoidable) for `https://www.typescriptlang.org/docs` and Node.js API docs (`https://nodejs.org/docs/latest/api/` or `https://nodejs.org/api/`). Decide whether to re-crawl or skip `https://docs.boat.dev` (`1` local page). Skip `.estel-local/docs/digitalocean` (already covered by `https://docs.digitalocean.com/`). | Run `mise exec -- docmancer docs list --config ~/.docmancer/docmancer.yaml` and query TypeScript and Node.js topics with `mise exec -- docmancer docs query "<topic>" --config ~/.docmancer/docmancer.yaml --budget 1200` to confirm page counts and retrieval quality. |
+| 1b | `~/repositories/personal/microboat` | Remove local Docmancer files | Delete `docmancer.yaml`, `.docmancer/`, `.estel-local/bin/docmancer`, `.estel-local/agent-bin/docmancer` (and empty `.estel-local/agent-bin/`), `.estel-local/docs/`, and `.junie/skills/docmancer.md`. Keep `.estel-local/bin/{microboat,microboat-server,node,shared,yarn}`. | Inside `microboat`, confirm `mise exec -- docmancer docs list` and `mise exec -- docmancer docs query "typescript ..." --budget 1200` resolve `~/.docmancer/docmancer.yaml` (including under `junie-safehouse`), and verify `.estel-local/bin/microboat`, `node`, and `yarn` still run. |
+| 2a | `~/repositories/personal/microvm-web-hosting` | Import missing docs globally | Try `mise exec -- docmancer docs add --strategy llms.txt <url>` first (avoid `llms-full.txt` unless unavoidable) for `https://symfony.com/doc`, `https://psalm.dev/docs`, `https://caddyserver.com/docs`, `https://frankenphp.dev/docs`, `https://www.php-fig.org/psr`, and `https://www.php-fig.org/per`. Decide whether to re-crawl or skip `https://docs.boat.dev` and `https://docs.dagger.io` (`1` local page each). Skip `.estel-local/docs/digitalocean`. | Run `mise exec -- docmancer docs list --config ~/.docmancer/docmancer.yaml` and test `mise exec -- docmancer docs query` against Symfony, Psalm, Caddy, FrankenPHP, and PHP-FIG (`PSR` / `PER`) before touching local files. |
+| 2b | `~/repositories/personal/microvm-web-hosting` | Remove local Docmancer files and update `.junie` rules | Delete `docmancer.yaml`, `.docmancer/`, `.estel-local/bin/docmancer`, `.estel-local/agent-bin/docmancer`, `.estel-local/docs/`, and `.junie/skills/docmancer.md`. Edit `.junie/rules/agent-commands.md` to remove the `docmancer` row, example, and notes. Keep `.estel-local/bin/{composer,dev,php,shared}` and `.estel-local/agent-bin/{composer,php}`. | Inside `microvm-web-hosting`, confirm `mise exec -- docmancer docs list` and `mise exec -- docmancer docs query "symfony ..." --budget 1200` resolve `~/.docmancer/docmancer.yaml` (including under `junie-safehouse`), and verify `.estel-local/agent-bin/php --version`, `.estel-local/agent-bin/composer --version`, and project tests pass. |
 
-Start with `microboat` because it has no `.junie/rules/agent-commands.md` dependencies and keeps cleanup minimal.
+### Phase 1: `microboat` First
 
-1. **Remove local Docmancer artifacts (preserve non-Docmancer `.estel-local/bin/*`):**
+Start with `microboat` because it has fewer candidate sources and no `.junie/rules/agent-commands.md` dependencies.
+
+1. **1a. Import and verify global docs for `microboat`:**
+   - Decide whether to re-crawl `https://docs.boat.dev` or skip it (`1` local page).
+   - Import TypeScript and Node.js API docs globally, prioritizing `--strategy llms.txt` and avoiding `llms-full.txt` or other strategies unless unavoidable:
+     ```bash
+     mise exec -- docmancer docs add --config ~/.docmancer/docmancer.yaml --strategy llms.txt <url>
+     ```
+   - Verify global availability and retrieval before deleting anything locally:
+     ```bash
+     mise exec -- docmancer docs list --config ~/.docmancer/docmancer.yaml
+     mise exec -- docmancer docs query "typescript <topic>" --config ~/.docmancer/docmancer.yaml --budget 1200
+     mise exec -- docmancer docs query "nodejs <topic>" --config ~/.docmancer/docmancer.yaml --budget 1200
+     ```
+2. **1b. Remove local Docmancer artifacts (preserve non-Docmancer `.estel-local/bin/*`):**
    - `docmancer.yaml`
    - `.docmancer/`
    - `.estel-local/bin/docmancer`
    - `.estel-local/agent-bin/docmancer` (if `.estel-local/agent-bin/` becomes empty, remove the empty directory)
    - `.estel-local/docs/` (`digitalocean/`, `digitalocean.sh`, `llms-download.php`, `nodejs/`)
    - `.junie/skills/docmancer.md`
-2. **Verify inside `~/repositories/personal/microboat`:**
+3. **Verify inside `~/repositories/personal/microboat`:**
    - Confirm `mise exec -- docmancer docs list` resolves `~/.docmancer/docmancer.yaml` and shows the global sources (including TypeScript / Node.js).
    - Confirm `mise exec -- docmancer docs query "typescript ..." --budget 1200` succeeds from the repo root (and inside `junie-safehouse` if testing sandboxed agent runs).
    - Confirm `.estel-local/bin/microboat`, `.estel-local/bin/node`, `.estel-local/bin/yarn`, and project tests/scripts still run cleanly.
 
-### Step 3: Clean Up `microvm-web-hosting` Second & Verify
+### Phase 2: `microvm-web-hosting` Second
 
-1. **Remove local Docmancer artifacts (preserve `php`, `composer`, `dev`, `shared`):**
+Proceed only after `microboat` is verified end-to-end.
+
+1. **2a. Import and verify global docs for `microvm-web-hosting`:**
+   - Decide whether to re-crawl `https://docs.boat.dev` / `https://docs.dagger.io` or skip them (`1` local page each).
+   - Import the approved PHP / web stack URLs (`https://symfony.com/doc`, `https://psalm.dev/docs`, `https://caddyserver.com/docs`, `https://frankenphp.dev/docs`, `https://www.php-fig.org/psr`, `https://www.php-fig.org/per`), prioritizing `--strategy llms.txt` and avoiding `llms-full.txt` or other strategies unless unavoidable:
+     ```bash
+     mise exec -- docmancer docs add --config ~/.docmancer/docmancer.yaml --strategy llms.txt <url>
+     ```
+   - Verify global availability and retrieval before deleting anything locally:
+     ```bash
+     mise exec -- docmancer docs list --config ~/.docmancer/docmancer.yaml
+     mise exec -- docmancer docs query "symfony <topic>" --config ~/.docmancer/docmancer.yaml --budget 1200
+     ```
+2. **2b. Remove local Docmancer artifacts (preserve `php`, `composer`, `dev`, `shared`):**
    - `docmancer.yaml`
    - `.docmancer/`
    - `.estel-local/bin/docmancer`
    - `.estel-local/agent-bin/docmancer` (keep `php` and `composer` in `.estel-local/agent-bin/`)
    - `.estel-local/docs/` (`digitalocean/`, `digitalocean.sh`, `llms-download.php`, `dagger/`)
    - `.junie/skills/docmancer.md`
-2. **Update `.junie/rules/agent-commands.md`:**
+3. **Update `.junie/rules/agent-commands.md`:**
    - Remove the `docmancer` row from the commands table, the `.estel-local/agent-bin/docmancer` usage example, and the two `docmancer` bullets under "Important details", leaving `php` and `composer` intact.
-3. **Verify inside `~/repositories/personal/microvm-web-hosting`:**
+4. **Verify inside `~/repositories/personal/microvm-web-hosting`:**
    - Confirm `mise exec -- docmancer docs list` resolves `~/.docmancer/docmancer.yaml` and shows the global PHP/Symfony/Psalm/Caddy/FrankenPHP sources.
    - Confirm `mise exec -- docmancer docs query "symfony ..." --budget 1200` succeeds from the repo root (and inside `junie-safehouse`).
    - Confirm `.estel-local/agent-bin/php --version`, `.estel-local/agent-bin/composer --version`, and project tests still work cleanly.
