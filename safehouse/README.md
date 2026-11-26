@@ -7,7 +7,7 @@ OS-level sandboxing configuration that wraps the Junie CLI in [Agent Safehouse](
 | Repo Path | Target Path | Purpose |
 | --- | --- | --- |
 | `safehouse/junie-safehouse` | `~/bin/junie-safehouse` | Wrapper script executing `~/.local/bin/junie` inside `safehouse` with scoped directory access, Docker support, and `LITELLM_MASTER_KEY` passthrough. |
-| `safehouse/junie-local.sb` | `~/.config/safehouse/junie-local.sb` | Machine-local Seatbelt (`.sb`) profile appended via `--append-profile`, granting read access to `~/.homebrew`, `~/npm`, `~/bin`, and `~/.gitignore_global`. |
+| `safehouse/junie-local.sb` | `~/.config/safehouse/junie-local.sb` | Machine-local Seatbelt (`.sb`) profile appended via `--append-profile`, granting read access to `~/.homebrew`, `~/npm`, `~/bin`, and `~/.gitignore_global`, plus read/write access to `~/.docmancer`. |
 | `safehouse/acp.json` | `~/.jetbrains/acp.json` | JetBrains / PhpStorm ACP configuration registering the `junie-safehouse` agent server (`--acp=true`). |
 
 ## Installation
