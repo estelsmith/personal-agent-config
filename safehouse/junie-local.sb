@@ -1,5 +1,5 @@
 ;; ---------------------------------------------------------------------------
-;; Machine-local Agent Safehouse appended profile for junie-safehouse-gemini-ladder
+;; Machine-local Agent Safehouse appended profile for junie-safehouse
 ;; Appended via: safehouse --append-profile="$HOME/.config/safehouse/junie-local.sb"
 ;; ---------------------------------------------------------------------------
 
