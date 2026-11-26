@@ -18,7 +18,7 @@ Installs missing or mismatched files and runs system lifecycle hooks:
 
 - Installs missing `sync` files and atomically updates files whose SHA-256 hash or permissions differ.
 - Seeds missing `seed` files (such as `.env.example` -> `~/litellm-proxy/.env`) while preserving existing local files.
-- Runs `<system>/hooks/pre-install` (before file sync) and `<system>/hooks/post-install` (after file sync, e.g., `litellm-proxy` syncing `LITELLM_MASTER_KEY` into `~/.bash_profile`, pulling images, building, and restarting the Docker Compose stack).
+- Runs `<system>/hooks/pre-install` (before file sync) and `<system>/hooks/post-install` (after file sync, e.g., `litellm-proxy` syncing `LITELLM_MASTER_KEY` into `~/.bash_profile` and pulling/building/restarting the Docker Compose stack when files changed, or checking stack health and only starting it if stopped or unhealthy when unchanged).
 - Prints a per-system summary report.
 
 Useful flags:

@@ -26,17 +26,27 @@ compose() {
     docker compose --project-directory "$target_dir" -f "$compose_file" "$@"
 }
 
-echo "Pulling upstream images..."
-compose pull --ignore-buildable
+if [ "${FILES_CHANGED:-1}" != "0" ]; then
+    echo "Pulling upstream images..."
+    compose pull --ignore-buildable
 
-echo "Building local images..."
-compose build
+    echo "Building local images..."
+    compose build
 
-echo "Stopping existing stack..."
-compose down
+    echo "Stopping existing stack..."
+    compose down
 
-echo "Starting stack and waiting for healthchecks..."
-compose up -d --wait
+    echo "Starting stack and waiting for healthchecks..."
+    compose up -d --wait
+else
+    echo "No manifest files changed; checking if stack is running and healthy..."
+    if python3 "${script_dir}/_compose_health.py" --fail-prefix "[WARN]"; then
+        echo "Stack is already running and healthy; skipping image pull, build, and stack start."
+    else
+        echo "Stack is not running or is unhealthy; skipping image pull, build, and teardown and starting stack..."
+        compose up -d --wait
+    fi
+fi
 
 echo "Stack status:"
 compose ps

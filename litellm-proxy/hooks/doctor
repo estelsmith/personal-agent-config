@@ -3,16 +3,13 @@
 
 from __future__ import annotations
 
-import json
-import os
 import shutil
 import subprocess
 import sys
-import urllib.error
-import urllib.request
 from pathlib import Path
 
 from _bash_profile import check_bash_profile, parse_dotenv
+from _compose_health import check_compose_stack
 
 
 REQUIRED_ENV_KEYS = (
@@ -46,40 +43,6 @@ def check_env_file(env_path: Path) -> bool:
     return ok
 
 
-def parse_compose_ps_json(output: str) -> list[dict]:
-    text = output.strip()
-    if not text:
-        return []
-    if text.startswith("["):
-        data = json.loads(text)
-        return [item for item in data if isinstance(item, dict)]
-    items: list[dict] = []
-    for line in text.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        parsed = json.loads(line)
-        if isinstance(parsed, dict):
-            items.append(parsed)
-    return items
-
-
-def check_http_endpoint(url: str) -> bool:
-    try:
-        with urllib.request.urlopen(url, timeout=3.0) as resp:
-            print(f"[OK] litellm endpoint {url} responded HTTP {resp.status}")
-            return True
-    except urllib.error.HTTPError as exc:
-        if exc.code < 500:
-            print(f"[OK] litellm endpoint {url} reachable (HTTP {exc.code})")
-            return True
-        print(f"[FAIL] litellm endpoint {url} returned HTTP {exc.code}")
-        return False
-    except Exception as exc:
-        print(f"[FAIL] litellm endpoint {url} unreachable: {exc}")
-        return False
-
-
 def main() -> int:
     home = Path.home()
     target_dir = home / "litellm-proxy"
@@ -111,83 +74,11 @@ def main() -> int:
         print(f"[FAIL] docker daemon unavailable: {msg}")
         return 1
 
-    if not compose_file.is_file():
-        print(f"[FAIL] missing {compose_file}")
-        return 1
-
-    base_cmd = [
-        "docker",
-        "compose",
-        "--project-directory",
-        str(target_dir),
-        "-f",
-        str(compose_file),
-    ]
-
-    svc_proc = subprocess.run(
-        [*base_cmd, "config", "--services"],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
-    if svc_proc.returncode != 0:
-        print(f"[FAIL] docker compose config failed: {svc_proc.stderr.strip()}")
-        return 1
-
-    expected_services = [
-        line.strip() for line in svc_proc.stdout.splitlines() if line.strip()
-    ]
-
-    ps_proc = subprocess.run(
-        [*base_cmd, "ps", "--all", "--format", "json"],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
-    if ps_proc.returncode != 0:
-        print(f"[FAIL] docker compose ps failed: {ps_proc.stderr.strip()}")
-        return 1
-
-    try:
-        containers = parse_compose_ps_json(ps_proc.stdout)
-    except json.JSONDecodeError as exc:
-        print(f"[FAIL] could not parse docker compose ps JSON output: {exc}")
-        return 1
-
-    by_service = {c.get("Service"): c for c in containers if c.get("Service")}
-
-    litellm_running = False
-    for svc in expected_services:
-        container = by_service.get(svc)
-        if container is None:
-            print(f"[FAIL] service '{svc}' has no container (stack not running)")
-            ok = False
-            continue
-
-        state = str(container.get("State", "")).lower()
-        health = str(container.get("Health", "")).lower()
-
-        if state != "running":
-            print(f"[FAIL] service '{svc}' is not running (state={state or 'unknown'})")
-            ok = False
-            continue
-
-        if health and health != "healthy":
-            print(f"[FAIL] service '{svc}' is unhealthy (state={state}, health={health})")
-            ok = False
-            continue
-
-        health_label = health if health else "no healthcheck"
-        print(f"[OK] service '{svc}' running ({health_label})")
-        if svc == "litellm":
-            litellm_running = True
-
-    if litellm_running:
-        health_url = os.environ.get(
-            "LITELLM_HEALTH_URL", "http://127.0.0.1:4000/health/liveliness"
-        )
-        if not check_http_endpoint(health_url):
-            ok = False
+    stack_ok, stack_msgs = check_compose_stack(target_dir, compose_file)
+    for msg in stack_msgs:
+        print(msg)
+    if not stack_ok:
+        ok = False
 
     return 0 if ok else 1
 

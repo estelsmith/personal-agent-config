@@ -207,14 +207,30 @@ sys.exit(0)
                 doc_stale.stdout,
             )
 
-            # Running bin/install updates ~/.bash_profile to match .env.
-            sync_inst = self._run(BIN_INSTALL, ["litellm-proxy"])
+            # Running bin/install with unchanged manifest files and a healthy stack updates
+            # ~/.bash_profile and skips docker compose pull/build/down/up.
+            self.docker_log.unlink(missing_ok=True)
+            sync_inst = self._run(
+                BIN_INSTALL,
+                ["litellm-proxy"],
+                extra_env={"LITELLM_HEALTH_URL": health_url},
+            )
             self.assertEqual(sync_inst.returncode, 0, sync_inst.stdout + sync_inst.stderr)
             self.assertIn("[UPDATED] ~/.bash_profile", sync_inst.stdout)
+            self.assertIn(
+                "Stack is already running and healthy; skipping image pull, build, and stack start.",
+                sync_inst.stdout,
+            )
             self.assertEqual(
                 bash_profile.read_text(encoding="utf-8"),
                 "export LITELLM_MASTER_KEY=sk-real-master\n",
             )
+            unchanged_docker_cmds = self.docker_log.read_text(encoding="utf-8").splitlines()
+            self.assertFalse(any("pull --ignore-buildable" in c for c in unchanged_docker_cmds))
+            self.assertFalse(any("compose" in c and " build" in c for c in unchanged_docker_cmds))
+            self.assertFalse(any("compose" in c and " down" in c for c in unchanged_docker_cmds))
+            self.assertFalse(any("compose" in c and " up -d --wait" in c for c in unchanged_docker_cmds))
+            self.assertTrue(any("compose" in c and " ps" in c for c in unchanged_docker_cmds))
 
             doc_ok = self._run(
                 BIN_DOCTOR,
@@ -250,6 +266,17 @@ sys.exit(0)
             )
             self.assertEqual(doc_fixed.returncode, 0, doc_fixed.stdout + doc_fixed.stderr)
 
+            # Force reinstall marks files updated (FILES_CHANGED=1) and runs pull/build/down/up.
+            self.docker_log.unlink(missing_ok=True)
+            forced = self._run(BIN_INSTALL, ["--force", "litellm-proxy"])
+            self.assertEqual(forced.returncode, 0, forced.stdout + forced.stderr)
+            self.assertIn("updated=5", forced.stdout)
+            forced_docker_cmds = self.docker_log.read_text(encoding="utf-8").splitlines()
+            self.assertTrue(any("pull --ignore-buildable" in c for c in forced_docker_cmds))
+            self.assertTrue(any("compose" in c and " build" in c for c in forced_docker_cmds))
+            self.assertTrue(any("compose" in c and " down" in c for c in forced_docker_cmds))
+            self.assertTrue(any("compose" in c and " up -d --wait" in c for c in forced_docker_cmds))
+
             # Unhealthy container fails doctor.
             self._install_fake_docker(
                 containers=[
@@ -269,6 +296,56 @@ sys.exit(0)
             )
             self.assertEqual(doc_unhealthy.returncode, 1)
             self.assertIn("service 'gemini-decision-adapter' is unhealthy", doc_unhealthy.stdout)
+
+            # With unchanged manifest files and an unhealthy stack, bin/install skips
+            # pull/build/down but still runs `compose up -d --wait`.
+            self.docker_log.unlink(missing_ok=True)
+            unhealthy_inst = self._run(
+                BIN_INSTALL,
+                ["litellm-proxy"],
+                extra_env={"LITELLM_HEALTH_URL": health_url},
+            )
+            self.assertEqual(unhealthy_inst.returncode, 0, unhealthy_inst.stdout + unhealthy_inst.stderr)
+            self.assertIn("Stack is not running or is unhealthy", unhealthy_inst.stdout)
+            unhealthy_docker_cmds = self.docker_log.read_text(encoding="utf-8").splitlines()
+            self.assertFalse(any("pull --ignore-buildable" in c for c in unhealthy_docker_cmds))
+            self.assertFalse(any("compose" in c and " build" in c for c in unhealthy_docker_cmds))
+            self.assertFalse(any("compose" in c and " down" in c for c in unhealthy_docker_cmds))
+            self.assertTrue(any("compose" in c and " up -d --wait" in c for c in unhealthy_docker_cmds))
+
+            # With unchanged manifest files and stopped/missing containers, bin/install starts stack.
+            self._install_fake_docker(containers=[])
+            self.docker_log.unlink(missing_ok=True)
+            stopped_inst = self._run(
+                BIN_INSTALL,
+                ["litellm-proxy"],
+                extra_env={"LITELLM_HEALTH_URL": health_url},
+            )
+            self.assertEqual(stopped_inst.returncode, 0, stopped_inst.stdout + stopped_inst.stderr)
+            self.assertIn("Stack is not running or is unhealthy", stopped_inst.stdout)
+            stopped_docker_cmds = self.docker_log.read_text(encoding="utf-8").splitlines()
+            self.assertFalse(any("pull --ignore-buildable" in c for c in stopped_docker_cmds))
+            self.assertFalse(any("compose" in c and " build" in c for c in stopped_docker_cmds))
+            self.assertFalse(any("compose" in c and " down" in c for c in stopped_docker_cmds))
+            self.assertTrue(any("compose" in c and " up -d --wait" in c for c in stopped_docker_cmds))
+
+            # With healthy containers but unreachable HTTP endpoint, bin/install starts stack.
+            self._install_fake_docker()
+            self.docker_log.unlink(missing_ok=True)
+            server.shutdown()
+            server.server_close()
+            dead_http_inst = self._run(
+                BIN_INSTALL,
+                ["litellm-proxy"],
+                extra_env={"LITELLM_HEALTH_URL": health_url},
+            )
+            self.assertEqual(dead_http_inst.returncode, 0, dead_http_inst.stdout + dead_http_inst.stderr)
+            self.assertIn("Stack is not running or is unhealthy", dead_http_inst.stdout)
+            dead_http_cmds = self.docker_log.read_text(encoding="utf-8").splitlines()
+            self.assertFalse(any("pull --ignore-buildable" in c for c in dead_http_cmds))
+            self.assertFalse(any("compose" in c and " build" in c for c in dead_http_cmds))
+            self.assertFalse(any("compose" in c and " down" in c for c in dead_http_cmds))
+            self.assertTrue(any("compose" in c and " up -d --wait" in c for c in dead_http_cmds))
         finally:
             server.shutdown()
             server.server_close()
@@ -388,7 +465,11 @@ sys.exit(0)
             )
 
             # Install appends export on a new line, preserving existing content and mode.
-            inst_add = self._run(BIN_INSTALL, ["litellm-proxy"])
+            inst_add = self._run(
+                BIN_INSTALL,
+                ["litellm-proxy"],
+                extra_env={"LITELLM_HEALTH_URL": health_url},
+            )
             self.assertEqual(inst_add.returncode, 0, inst_add.stdout + inst_add.stderr)
             self.assertIn("[ADDED] ~/.bash_profile", inst_add.stdout)
             self.assertEqual(stat.S_IMODE(bash_profile.stat().st_mode), 0o600)
@@ -401,7 +482,11 @@ sys.exit(0)
             )
 
             # Second install reports already matches.
-            inst_ok = self._run(BIN_INSTALL, ["litellm-proxy"])
+            inst_ok = self._run(
+                BIN_INSTALL,
+                ["litellm-proxy"],
+                extra_env={"LITELLM_HEALTH_URL": health_url},
+            )
             self.assertEqual(inst_ok.returncode, 0, inst_ok.stdout + inst_ok.stderr)
             self.assertIn(
                 "[OK] ~/.bash_profile: export LITELLM_MASTER_KEY already matches",
@@ -419,7 +504,11 @@ sys.exit(0)
                 extra_env={"LITELLM_HEALTH_URL": health_url},
             )
             self.assertEqual(doc_quoted.returncode, 0, doc_quoted.stdout + doc_quoted.stderr)
-            inst_quoted = self._run(BIN_INSTALL, ["litellm-proxy"])
+            inst_quoted = self._run(
+                BIN_INSTALL,
+                ["litellm-proxy"],
+                extra_env={"LITELLM_HEALTH_URL": health_url},
+            )
             self.assertEqual(inst_quoted.returncode, 0, inst_quoted.stdout + inst_quoted.stderr)
             self.assertIn("already matches", inst_quoted.stdout)
             self.assertEqual(
@@ -441,7 +530,11 @@ sys.exit(0)
             )
             self.assertEqual(doc_dup.returncode, 1)
 
-            inst_dedup = self._run(BIN_INSTALL, ["litellm-proxy"])
+            inst_dedup = self._run(
+                BIN_INSTALL,
+                ["litellm-proxy"],
+                extra_env={"LITELLM_HEALTH_URL": health_url},
+            )
             self.assertEqual(inst_dedup.returncode, 0, inst_dedup.stdout + inst_dedup.stderr)
             self.assertIn("[UPDATED] ~/.bash_profile", inst_dedup.stdout)
             self.assertEqual(
