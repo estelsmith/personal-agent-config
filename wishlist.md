@@ -9,7 +9,7 @@ Random things I want to be consolidated/fixed in my personal agent configuration
     - Maybe bootstrap Mise before anything else with Python as the only pre-installed tool?
 - Why `python3` instead of `python` in CLI? Both are in Mise, so maybe switch to `python` so it always uses the current version.
 - The CLI tooling for `doctor`/`install` is pretty garbage. It needs to be rewritten to be more coherent.
-  - This is what you get for blindly vibe-coding a CLI tool.
+  - This is what you get for blindly vibe-coding a CLI tool without quality enforcement. LLMs can reason about this shit but humans can't.
 - System installations run in arbitrary order, when in reality the `mise` system needs to be the very first. Without Mise, most of this will fall apart.
   - Implement a simple DAG that ensures that `doctor mise` comes back clean before anything the depends on it for doctor/install.
   - Don't automatically `install mise` when trying to install dependents. Simply don't allow the dependency to continue to installation if this prerequisite fails.
