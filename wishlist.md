@@ -15,3 +15,5 @@ Random things I want to be consolidated into my personal agent configuration.
 - Install and manage https://github.com/estelsmith/llm-task-dispatcher
   - Probably can go in `junie` since it's junie-specific.
   - Shallow clone of repo, run install/doctor commands internally?
+- How can we remove the system `python` dependency from the `doctor`/`install` commands?
+  - Maybe pure bash?
