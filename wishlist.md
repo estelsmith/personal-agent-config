@@ -33,3 +33,5 @@ Random things I want to be consolidated/fixed in my personal agent configuration
 - Move steel browser into this repo. See `~/repositories/firmprospects/engage/` for example setup.
 - Can we move away from custom `doctor`/`install` commands to Mise tasks, or a more generic config management system?
   - Ansible, etc.
+- [hk](https://hk.jdx.dev/) for global/local git hook management
+  - Useful for Graphify automatic graph updates on git checkout, update, or pre-commit.
