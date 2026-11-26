@@ -42,13 +42,13 @@ JetBrains IDE (~/.jetbrains/acp.json) or Terminal
   - Allows read/write access to `~/.docmancer` (SQLite index, `sqlite-vec` database, extracted docs, and embeddings cache).
 - **JetBrains ACP registration (`acp.json` → `~/.jetbrains/acp.json`)**:
   - Registers the `junie-safehouse` agent server with `--acp=true` for JetBrains IDEs.
+  - `safehouse/acp.json` uses `${HOME}/bin/junie-safehouse`; `safehouse/hooks/post-install` expands `${HOME}` and syncs `~/.jetbrains/acp.json` (`0644`) because JetBrains ACP requires an absolute path.
 
 ## Prerequisites & Machine-Specific Notes
 
 1. **Agent Safehouse installed** at `~/.homebrew/bin/safehouse` (this setup uses a user-local Homebrew prefix at `~/.homebrew`).
 2. **Junie CLI installed** at `~/.local/bin/junie`.
 3. **`LITELLM_MASTER_KEY` exported** in your shell environment (automatically synced into `~/.bash_profile` when installing [`litellm-proxy`](../litellm-proxy/README.md)).
-4. **Username path in `acp.json`**: `safehouse/acp.json` sets `"command": "/Users/esmith/bin/junie-safehouse"` because JetBrains ACP requires an absolute path. If adapting this repo for a different macOS user, update that path to match `/Users/<you>/bin/junie-safehouse`.
 
 ## Quick Start
 
@@ -74,13 +74,15 @@ Or select **junie-safehouse** in your JetBrains IDE's ACP agent settings.
 | --- | --- | --- | --- |
 | `safehouse/junie-safehouse` | `~/bin/junie-safehouse` | `0755` | Executable `safehouse` wrapper script invoking `~/.local/bin/junie`. |
 | `safehouse/junie-local.sb` | `~/.config/safehouse/junie-local.sb` | `0644` | Appended Seatbelt rules for `~/.homebrew`, `~/npm`, `~/bin`, `~/.gitignore_global`, and `~/.docmancer`. |
-| `safehouse/acp.json` | `~/.jetbrains/acp.json` | `0644` | JetBrains ACP server definition pointing to `junie-safehouse --acp=true`. |
-| `safehouse/hooks/doctor` | *(hook)* | `0755` | Verifies executables, ACP JSON command path, and `LITELLM_MASTER_KEY`. |
+| `safehouse/acp.json` | `~/.jetbrains/acp.json` | `0644` | JetBrains ACP template (`${HOME}` expanded by `hooks/post-install`). |
+| `safehouse/hooks/post-install` | *(hook)* | `0755` | Expands `${HOME}` in `safehouse/acp.json` and atomically syncs `~/.jetbrains/acp.json`. |
+| `safehouse/hooks/doctor` | *(hook)* | `0755` | Verifies executables, rendered ACP config (SHA-256, mode, JSON command), and `LITELLM_MASTER_KEY`. |
+| `safehouse/hooks/_safehouse.py` | *(helper)* | `0644` | Shared `${HOME}` rendering, atomic write, and SHA-256/mode verification for `acp.json`. |
 
 ## Health Checks (`bin/doctor safehouse`)
 
 After checking manifest file hashes and permissions, `safehouse/hooks/doctor` verifies:
 
 1. `~/bin/junie-safehouse`, `~/.homebrew/bin/safehouse`, and `~/.local/bin/junie` exist and are executable.
-2. `~/.jetbrains/acp.json` is valid JSON, defines `agent_servers.junie-safehouse.command`, and points to an executable matching `~/bin/junie-safehouse`.
+2. `~/.jetbrains/acp.json` is a regular file (`0644`) whose SHA-256 matches `safehouse/acp.json` with `${HOME}` expanded, is valid JSON, defines `agent_servers.junie-safehouse.command`, and points to an executable matching `~/bin/junie-safehouse`.
 3. `LITELLM_MASTER_KEY` is set in the current environment (prints a `[WARN]` if unset, since `junie-safehouse` forwards it via `--env-pass=LITELLM_MASTER_KEY`).

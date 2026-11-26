@@ -2,7 +2,7 @@
     "default_mcp_settings": {},
     "agent_servers": {
         "junie-safehouse": {
-            "command": "/Users/esmith/bin/junie-safehouse",
+            "command": "${HOME}/bin/junie-safehouse",
             "args": ["--acp=true"]
         }
     }

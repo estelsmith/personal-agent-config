@@ -6,7 +6,7 @@ Repository-specific guidance for agents working in `personal-agent-config` (a ma
 
 - **Global rules vs. repo instructions:** `junie/rules/*.md` compiles into `~/.junie/AGENTS.md` and applies to *all* repositories. Put rules meant for every repo in `junie/rules/`, and keep rules specific to developing this repository in this `AGENTS.md`.
 - **Edit repo sources, not deployed files:** Never directly edit deployed targets under `~/` (such as `~/.junie/AGENTS.md`, `~/litellm-proxy/*`, `~/bin/junie-safehouse`, or `~/.bash_profile`). Edit the source files in this repo and sync via `bin/install` only when appropriate.
-- **Treat `wishlist.md` as backlog:** Items in `wishlist.md` describe future ideas and known debt (such as hardcoded paths in `safehouse/acp.json` or replacing the system-Python assumption), not implemented behavior.
+- **Treat `wishlist.md` as backlog:** Items in `wishlist.md` describe future ideas and known debt (such as a system dependency DAG or replacing the system-Python assumption), not implemented behavior.
 - **Secrets:** Never commit `litellm-proxy/.env` or real API keys/tokens. Use `.env.example` and `sync-or-seed` manifest entries instead.
 
 ## Safe Testing & Verification

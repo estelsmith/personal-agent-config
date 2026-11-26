@@ -8,6 +8,8 @@ import os
 import sys
 from pathlib import Path
 
+from _safehouse import check_acp_json
+
 
 def check_executable(path: Path, label: str) -> bool:
     if not path.exists():
@@ -22,6 +24,7 @@ def check_executable(path: Path, label: str) -> bool:
 
 def main() -> int:
     home = Path.home()
+    system_dir = Path(os.environ.get("SYSTEM_DIR") or Path(__file__).resolve().parent.parent)
     ok = True
 
     wrapper = home / "bin" / "junie-safehouse"
@@ -36,10 +39,12 @@ def main() -> int:
     if not check_executable(junie_bin, "junie binary"):
         ok = False
 
-    if not acp_json.is_file():
-        print(f"[FAIL] missing ACP config: {acp_json}")
+    acp_ok, acp_msg = check_acp_json(system_dir, acp_json, home=home)
+    print(acp_msg)
+    if not acp_ok:
         ok = False
-    else:
+
+    if acp_json.is_file():
         try:
             data = json.loads(acp_json.read_text(encoding="utf-8"))
         except json.JSONDecodeError as exc:

@@ -414,12 +414,35 @@ sys.exit(0)
             server.server_close()
 
     def test_safehouse_install_and_doctor(self) -> None:
+        acp_path = self.home / ".jetbrains" / "acp.json"
+        wrapper = self.home / "bin" / "junie-safehouse"
+        expected_acp = (REPO_ROOT / "safehouse" / "acp.json").read_text(
+            encoding="utf-8"
+        ).replace("${HOME}", str(self.home))
+
+        # Dry run must not create manifest targets or ~/.jetbrains/acp.json.
+        dry = self._run(BIN_INSTALL, ["--dry-run", "safehouse"])
+        self.assertEqual(dry.returncode, 0, dry.stdout + dry.stderr)
+        self.assertFalse(wrapper.exists())
+        self.assertFalse(acp_path.exists())
+        self.assertIn("hook=dry-run", dry.stdout)
+
+        # Install syncs manifest files and renders ~/.jetbrains/acp.json with ${HOME} expanded.
         inst = self._run(BIN_INSTALL, ["safehouse"])
         self.assertEqual(inst.returncode, 0, inst.stdout + inst.stderr)
-        self.assertIn("installed=3", inst.stdout)
-
-        wrapper = self.home / "bin" / "junie-safehouse"
+        self.assertIn("installed=2", inst.stdout)
+        self.assertIn("[INSTALLED] ~/.jetbrains/acp.json", inst.stdout)
         self.assertEqual(stat.S_IMODE(wrapper.stat().st_mode), 0o755)
+        self.assertTrue(acp_path.is_file())
+        self.assertFalse(acp_path.is_symlink())
+        self.assertEqual(stat.S_IMODE(acp_path.stat().st_mode), 0o644)
+        self.assertEqual(acp_path.read_text(encoding="utf-8"), expected_acp)
+        self.assertNotIn("${HOME}", acp_path.read_text(encoding="utf-8"))
+        acp_data = json.loads(acp_path.read_text(encoding="utf-8"))
+        self.assertEqual(
+            acp_data["agent_servers"]["junie-safehouse"]["command"],
+            str(wrapper),
+        )
 
         # Create prerequisite binaries under fake HOME.
         for rel in (".homebrew/bin/safehouse", ".local/bin/junie"):
@@ -428,16 +451,64 @@ sys.exit(0)
             p.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
             p.chmod(0o755)
 
-        # Point ACP config in fake HOME or verify if real /Users/esmith/bin/junie-safehouse exists;
-        # make mode wrong on wrapper and confirm doctor catches mode mismatch & install fixes it.
+        # Doctor passes cleanly with ${HOME}-rendered ACP config pointing at fake HOME wrapper.
+        doc_ok = self._run(BIN_DOCTOR, ["safehouse"])
+        self.assertEqual(doc_ok.returncode, 0, doc_ok.stdout + doc_ok.stderr)
+        self.assertIn("[OK] ~/.jetbrains/acp.json", doc_ok.stdout)
+        self.assertIn(f"[OK] ACP server command executable: {wrapper}", doc_ok.stdout)
+
+        # Re-running install is idempotent.
+        reinst = self._run(BIN_INSTALL, ["safehouse"])
+        self.assertEqual(reinst.returncode, 0, reinst.stdout + reinst.stderr)
+        self.assertIn("[OK] ~/.jetbrains/acp.json (unchanged)", reinst.stdout)
+
+        # Mode drift on wrapper is caught by doctor and repaired by install.
         wrapper.chmod(0o644)
         doc_mode = self._run(BIN_DOCTOR, ["safehouse"])
         self.assertEqual(doc_mode.returncode, 1)
         self.assertIn("mode mismatch: ~/bin/junie-safehouse", doc_mode.stdout)
 
         repair = self._run(BIN_INSTALL, ["safehouse"])
-        self.assertEqual(repair.returncode, 0)
+        self.assertEqual(repair.returncode, 0, repair.stdout + repair.stderr)
         self.assertEqual(stat.S_IMODE(wrapper.stat().st_mode), 0o755)
+
+        # Content drift in ~/.jetbrains/acp.json triggers doctor failure and install repair.
+        acp_path.write_text('{"agent_servers": {}}\n', encoding="utf-8")
+        doc_acp_drift = self._run(BIN_DOCTOR, ["safehouse"])
+        self.assertEqual(doc_acp_drift.returncode, 1)
+        self.assertIn("sha256 mismatch: ~/.jetbrains/acp.json", doc_acp_drift.stdout)
+
+        fix_acp = self._run(BIN_INSTALL, ["safehouse"])
+        self.assertEqual(fix_acp.returncode, 0, fix_acp.stdout + fix_acp.stderr)
+        self.assertIn("[UPDATED] ~/.jetbrains/acp.json", fix_acp.stdout)
+        self.assertEqual(acp_path.read_text(encoding="utf-8"), expected_acp)
+
+        # Mode drift in ~/.jetbrains/acp.json triggers doctor failure and install repair.
+        acp_path.chmod(0o600)
+        doc_acp_mode = self._run(BIN_DOCTOR, ["safehouse"])
+        self.assertEqual(doc_acp_mode.returncode, 1)
+        self.assertIn("mode mismatch: ~/.jetbrains/acp.json", doc_acp_mode.stdout)
+
+        fix_acp_mode = self._run(BIN_INSTALL, ["safehouse"])
+        self.assertEqual(fix_acp_mode.returncode, 0, fix_acp_mode.stdout + fix_acp_mode.stderr)
+        self.assertIn("mode 0600 -> 0644", fix_acp_mode.stdout)
+        self.assertEqual(stat.S_IMODE(acp_path.stat().st_mode), 0o644)
+
+        # Symlink target in ~/.jetbrains/acp.json is rejected and replaced without clobbering target.
+        sentinel = self.tmp / "acp-sentinel.json"
+        sentinel.write_text("keep-me\n", encoding="utf-8")
+        acp_path.unlink()
+        acp_path.symlink_to(sentinel)
+        doc_acp_sym = self._run(BIN_DOCTOR, ["safehouse"])
+        self.assertEqual(doc_acp_sym.returncode, 1)
+        self.assertIn("symlink (expected regular file): ~/.jetbrains/acp.json", doc_acp_sym.stdout)
+
+        fix_acp_sym = self._run(BIN_INSTALL, ["safehouse"])
+        self.assertEqual(fix_acp_sym.returncode, 0, fix_acp_sym.stdout + fix_acp_sym.stderr)
+        self.assertIn("symlink replaced", fix_acp_sym.stdout)
+        self.assertFalse(acp_path.is_symlink())
+        self.assertEqual(acp_path.read_text(encoding="utf-8"), expected_acp)
+        self.assertEqual(sentinel.read_text(encoding="utf-8"), "keep-me\n")
 
     def test_symlink_replacement_does_not_clobber_target(self) -> None:
         sentinel = self.tmp / "sentinel.txt"

@@ -7,7 +7,6 @@ Random things I want to be consolidated/fixed in my personal agent configuration
 - How can we remove the system `python` dependency from the `doctor`/`install` commands?
     - Maybe pure bash?
     - Maybe bootstrap Mise before anything else with Python as the only pre-installed tool?
-- `safehouse/acp.json` has a hardcoded user-path. Use `envsubst` or similar to pre-fill `${HOME}`.
 - System installations run in arbitrary order, when in reality the `mise` system needs to be the very first. Without Mise, most of this will fall apart.
   - Implement a simple DAG that ensures that `doctor mise` comes back clean before anything the depends on it for doctor/install.
   - Don't automatically `install mise` when trying to install dependents. Simply don't allow the dependency to continue to installation if this prerequisite fails.
