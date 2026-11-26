@@ -1,6 +1,6 @@
 <img src="assets/banner.svg" alt="Personal Agent Config" width="100%">
 
-# Personal Agent Config
+# Estel's Personal AI Agent
 
 This is my personal configuration repository for standing up and maintaining a local AI coding agent environment on **macOS** around **JetBrains** IDEs and **Junie**.
 
