@@ -35,3 +35,4 @@ Random things I want to be consolidated/fixed in my personal agent configuration
   - Ansible, etc.
 - [hk](https://hk.jdx.dev/) for global/local git hook management
   - Useful for Graphify automatic graph updates on git checkout, update, or pre-commit.
+- `safehouse` currently allows Docker CLI tools (`Docker.app/Contents/Resources/{bin,cli-plugins}`) and broad Docker daemon access via `--enable=docker`. Implement a host-level Docker socket proxy so Junie can only work with the project-local Docker Compose setup and cannot abuse unrestricted Docker socket access (such as mounting host paths or escalating to root).
