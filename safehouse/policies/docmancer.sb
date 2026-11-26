@@ -1,0 +1,8 @@
+;; Docmancer config, SQLite/vector stores, extracted pages, and embeddings cache.
+(allow file-read-metadata
+    (home-literal "/.docmancer")
+)
+
+(allow file-read* file-write*
+    (home-subpath "/.docmancer")
+)

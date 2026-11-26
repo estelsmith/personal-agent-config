@@ -36,9 +36,11 @@ JetBrains IDE (~/.jetbrains/acp.json) or Terminal
   - Grants read/write access to `~/.junie` (sessions, skills, logs) and `~/.mcp-auth`.
   - Grants read-only access to `~/.local/bin`, `~/.local/share/junie`, `~/Applications/PhpStorm.app`, and `~/mcp-servers`.
   - Enables Docker access (`--enable=docker`) and forwards `LITELLM_MASTER_KEY` from the host environment (`--env-pass=LITELLM_MASTER_KEY`) so Junie can talk to [`litellm-proxy`](../litellm-proxy/README.md).
-- **Appended Seatbelt profile (`junie-local.sb` → `~/.config/safehouse/junie-local.sb`)**:
-  - Allows metadata & read access to `~/.homebrew`, `~/npm`, `~/bin`, and `~/.gitignore_global`.
-  - Allows read/write access to `~/.docmancer` (SQLite index, `sqlite-vec` database, extracted docs, and embeddings cache).
+- **Appended Seatbelt profile (`policies/*.sb` → `~/.config/safehouse/junie-local.sb`)**:
+  - `safehouse/hooks/post-install` concatenates `safehouse/policies/*.sb` alphabetically and atomically writes `~/.config/safehouse/junie-local.sb` (`0644`):
+  - `policies/desktop-apps.sb`: Blocks direct execution of macOS `.app` bundles under `/Applications`, `/System/Volumes/Data/Applications`, `/System/Applications`, `/System/Cryptexes/App/System/Applications`, and `~/Applications` (with a carve-out for `Docker.app/Contents/Resources/{bin,cli-plugins}`), and denies `lsopen`, `/usr/bin/open`, and `/usr/bin/osascript`.
+  - `policies/docmancer.sb`: Allows read/write access to `~/.docmancer` (SQLite index, `sqlite-vec` database, extracted docs, and embeddings cache).
+  - `policies/local-tools.sb`: Allows metadata and read access to `~/.homebrew`, `~/npm`, `~/bin`, and `~/.gitignore_global`.
 - **JetBrains ACP registration (`acp.json` → `~/.jetbrains/acp.json`)**:
   - Registers the `junie-safehouse` agent server with `--acp=true` for JetBrains IDEs.
   - `safehouse/acp.json` uses `${HOME}/bin/junie-safehouse`; `safehouse/hooks/post-install` expands `${HOME}` and syncs `~/.jetbrains/acp.json` (`0644`) because JetBrains ACP requires an absolute path.
@@ -72,16 +74,17 @@ Or select **junie-safehouse** in your JetBrains IDE's ACP agent settings.
 | Repo Source | Target Path | Mode | Purpose |
 | --- | --- | --- | --- |
 | `safehouse/junie-safehouse` | `~/bin/junie-safehouse` | `0755` | Executable `safehouse` wrapper script invoking `~/.local/bin/junie`. |
-| `safehouse/junie-local.sb` | `~/.config/safehouse/junie-local.sb` | `0644` | Appended Seatbelt rules for `~/.homebrew`, `~/npm`, `~/bin`, `~/.gitignore_global`, and `~/.docmancer`. |
+| `safehouse/policies/*.sb` | `~/.config/safehouse/junie-local.sb` | `0644` | Scoped Seatbelt policy snippets concatenated by `hooks/post-install` (`desktop-apps.sb`, `docmancer.sb`, `local-tools.sb`). |
 | `safehouse/acp.json` | `~/.jetbrains/acp.json` | `0644` | JetBrains ACP template (`${HOME}` expanded by `hooks/post-install`). |
-| `safehouse/hooks/post-install` | *(hook)* | `0755` | Expands `${HOME}` in `safehouse/acp.json` and atomically syncs `~/.jetbrains/acp.json`. |
-| `safehouse/hooks/doctor` | *(hook)* | `0755` | Verifies executables, rendered ACP config (SHA-256, mode, JSON command), and `LITELLM_MASTER_KEY`. |
-| `safehouse/hooks/_safehouse.py` | *(helper)* | `0644` | Shared `${HOME}` rendering, atomic write, and SHA-256/mode verification for `acp.json`. |
+| `safehouse/hooks/post-install` | *(hook)* | `0755` | Compiles `safehouse/policies/*.sb` into `~/.config/safehouse/junie-local.sb` and expands `${HOME}` in `safehouse/acp.json` into `~/.jetbrains/acp.json`. |
+| `safehouse/hooks/doctor` | *(hook)* | `0755` | Verifies executables, compiled `junie-local.sb` (SHA-256 and mode), rendered ACP config (SHA-256, mode, JSON command), and `LITELLM_MASTER_KEY`. |
+| `safehouse/hooks/_safehouse.py` | *(helper)* | `0644` | Shared `policies/*.sb` compilation, `${HOME}` rendering, atomic write, and SHA-256/mode verification. |
 
 ## Health Checks (`bin/doctor safehouse`)
 
 After checking manifest file hashes and permissions, `safehouse/hooks/doctor` verifies:
 
 1. `~/bin/junie-safehouse`, `~/.homebrew/bin/safehouse`, and `~/.local/bin/junie` exist and are executable.
-2. `~/.jetbrains/acp.json` is a regular file (`0644`) whose SHA-256 matches `safehouse/acp.json` with `${HOME}` expanded, is valid JSON, defines `agent_servers.junie-safehouse.command`, and points to an executable matching `~/bin/junie-safehouse`.
-3. `LITELLM_MASTER_KEY` is set in the current environment (prints a `[WARN]` if unset, since `junie-safehouse` forwards it via `--env-pass=LITELLM_MASTER_KEY`).
+2. `~/.config/safehouse/junie-local.sb` is a regular file (`0644`) whose SHA-256 matches the compiled `safehouse/policies/*.sb` output.
+3. `~/.jetbrains/acp.json` is a regular file (`0644`) whose SHA-256 matches `safehouse/acp.json` with `${HOME}` expanded, is valid JSON, defines `agent_servers.junie-safehouse.command`, and points to an executable matching `~/bin/junie-safehouse`.
+4. `LITELLM_MASTER_KEY` is set in the current environment (prints a `[WARN]` if unset, since `junie-safehouse` forwards it via `--env-pass=LITELLM_MASTER_KEY`).

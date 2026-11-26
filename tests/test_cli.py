@@ -415,24 +415,39 @@ sys.exit(0)
 
     def test_safehouse_install_and_doctor(self) -> None:
         acp_path = self.home / ".jetbrains" / "acp.json"
+        local_profile = self.home / ".config" / "safehouse" / "junie-local.sb"
         wrapper = self.home / "bin" / "junie-safehouse"
+        policy_files = sorted(
+            (REPO_ROOT / "safehouse" / "policies").glob("*.sb"),
+            key=lambda p: p.name,
+        )
         expected_acp = (REPO_ROOT / "safehouse" / "acp.json").read_text(
             encoding="utf-8"
         ).replace("${HOME}", str(self.home))
 
-        # Dry run must not create manifest targets or ~/.jetbrains/acp.json.
+        # Dry run must not create manifest targets, ~/.config/safehouse/junie-local.sb, or ~/.jetbrains/acp.json.
         dry = self._run(BIN_INSTALL, ["--dry-run", "safehouse"])
         self.assertEqual(dry.returncode, 0, dry.stdout + dry.stderr)
         self.assertFalse(wrapper.exists())
+        self.assertFalse(local_profile.exists())
         self.assertFalse(acp_path.exists())
         self.assertIn("hook=dry-run", dry.stdout)
 
-        # Install syncs manifest files and renders ~/.jetbrains/acp.json with ${HOME} expanded.
+        # Install syncs manifest files, compiles policies/*.sb, and renders ~/.jetbrains/acp.json.
         inst = self._run(BIN_INSTALL, ["safehouse"])
         self.assertEqual(inst.returncode, 0, inst.stdout + inst.stderr)
-        self.assertIn("installed=2", inst.stdout)
+        self.assertIn("installed=1", inst.stdout)
+        self.assertIn("[INSTALLED] ~/.config/safehouse/junie-local.sb", inst.stdout)
         self.assertIn("[INSTALLED] ~/.jetbrains/acp.json", inst.stdout)
         self.assertEqual(stat.S_IMODE(wrapper.stat().st_mode), 0o755)
+        self.assertTrue(local_profile.is_file())
+        self.assertFalse(local_profile.is_symlink())
+        self.assertEqual(stat.S_IMODE(local_profile.stat().st_mode), 0o644)
+        profile_text = local_profile.read_text(encoding="utf-8")
+        self.assertIn('(subpath "/Applications")', profile_text)
+        self.assertIn('(subpath "/Applications/Docker.app/Contents/Resources/bin")', profile_text)
+        self.assertIn('(home-subpath "/.docmancer")', profile_text)
+        self.assertIn('(home-subpath "/.homebrew")', profile_text)
         self.assertTrue(acp_path.is_file())
         self.assertFalse(acp_path.is_symlink())
         self.assertEqual(stat.S_IMODE(acp_path.stat().st_mode), 0o644)
@@ -451,15 +466,20 @@ sys.exit(0)
             p.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
             p.chmod(0o755)
 
-        # Doctor passes cleanly with ${HOME}-rendered ACP config pointing at fake HOME wrapper.
+        # Doctor passes cleanly with compiled junie-local.sb and ${HOME}-rendered ACP config.
         doc_ok = self._run(BIN_DOCTOR, ["safehouse"])
         self.assertEqual(doc_ok.returncode, 0, doc_ok.stdout + doc_ok.stderr)
+        self.assertIn("[OK] ~/.config/safehouse/junie-local.sb", doc_ok.stdout)
         self.assertIn("[OK] ~/.jetbrains/acp.json", doc_ok.stdout)
         self.assertIn(f"[OK] ACP server command executable: {wrapper}", doc_ok.stdout)
 
         # Re-running install is idempotent.
         reinst = self._run(BIN_INSTALL, ["safehouse"])
         self.assertEqual(reinst.returncode, 0, reinst.stdout + reinst.stderr)
+        self.assertIn(
+            f"[OK] ~/.config/safehouse/junie-local.sb (unchanged, {len(policy_files)} policy file(s))",
+            reinst.stdout,
+        )
         self.assertIn("[OK] ~/.jetbrains/acp.json (unchanged)", reinst.stdout)
 
         # Mode drift on wrapper is caught by doctor and repaired by install.
@@ -471,6 +491,47 @@ sys.exit(0)
         repair = self._run(BIN_INSTALL, ["safehouse"])
         self.assertEqual(repair.returncode, 0, repair.stdout + repair.stderr)
         self.assertEqual(stat.S_IMODE(wrapper.stat().st_mode), 0o755)
+
+        # Content drift in ~/.config/safehouse/junie-local.sb triggers doctor failure and install repair.
+        local_profile.write_text(";; stale\n", encoding="utf-8")
+        doc_profile_drift = self._run(BIN_DOCTOR, ["safehouse"])
+        self.assertEqual(doc_profile_drift.returncode, 1)
+        self.assertIn("sha256 mismatch: ~/.config/safehouse/junie-local.sb", doc_profile_drift.stdout)
+
+        fix_profile = self._run(BIN_INSTALL, ["safehouse"])
+        self.assertEqual(fix_profile.returncode, 0, fix_profile.stdout + fix_profile.stderr)
+        self.assertIn("[UPDATED] ~/.config/safehouse/junie-local.sb", fix_profile.stdout)
+        self.assertEqual(local_profile.read_text(encoding="utf-8"), profile_text)
+
+        # Mode drift in ~/.config/safehouse/junie-local.sb triggers doctor failure and install repair.
+        local_profile.chmod(0o600)
+        doc_profile_mode = self._run(BIN_DOCTOR, ["safehouse"])
+        self.assertEqual(doc_profile_mode.returncode, 1)
+        self.assertIn("mode mismatch: ~/.config/safehouse/junie-local.sb", doc_profile_mode.stdout)
+
+        fix_profile_mode = self._run(BIN_INSTALL, ["safehouse"])
+        self.assertEqual(fix_profile_mode.returncode, 0, fix_profile_mode.stdout + fix_profile_mode.stderr)
+        self.assertIn("mode 0600 -> 0644", fix_profile_mode.stdout)
+        self.assertEqual(stat.S_IMODE(local_profile.stat().st_mode), 0o644)
+
+        # Symlink target in ~/.config/safehouse/junie-local.sb is rejected and replaced without clobbering target.
+        profile_sentinel = self.tmp / "profile-sentinel.sb"
+        profile_sentinel.write_text("keep-profile-sentinel\n", encoding="utf-8")
+        local_profile.unlink()
+        local_profile.symlink_to(profile_sentinel)
+        doc_profile_sym = self._run(BIN_DOCTOR, ["safehouse"])
+        self.assertEqual(doc_profile_sym.returncode, 1)
+        self.assertIn(
+            "symlink (expected regular file): ~/.config/safehouse/junie-local.sb",
+            doc_profile_sym.stdout,
+        )
+
+        fix_profile_sym = self._run(BIN_INSTALL, ["safehouse"])
+        self.assertEqual(fix_profile_sym.returncode, 0, fix_profile_sym.stdout + fix_profile_sym.stderr)
+        self.assertIn("symlink replaced", fix_profile_sym.stdout)
+        self.assertFalse(local_profile.is_symlink())
+        self.assertEqual(local_profile.read_text(encoding="utf-8"), profile_text)
+        self.assertEqual(profile_sentinel.read_text(encoding="utf-8"), "keep-profile-sentinel\n")
 
         # Content drift in ~/.jetbrains/acp.json triggers doctor failure and install repair.
         acp_path.write_text('{"agent_servers": {}}\n', encoding="utf-8")
@@ -513,7 +574,7 @@ sys.exit(0)
     def test_symlink_replacement_does_not_clobber_target(self) -> None:
         sentinel = self.tmp / "sentinel.txt"
         sentinel.write_text("do-not-overwrite\n", encoding="utf-8")
-        target = self.home / ".config" / "safehouse" / "junie-local.sb"
+        target = self.home / "bin" / "junie-safehouse"
         target.parent.mkdir(parents=True, exist_ok=True)
         target.symlink_to(sentinel)
 
@@ -1494,6 +1555,74 @@ sys.exit(0)
         inst_empty = self._run(bin_install, ["junie"])
         self.assertEqual(inst_empty.returncode, 1)
         self.assertIn("no *.md rule files found", inst_empty.stdout)
+
+    def test_safehouse_multiple_policies_concatenation(self) -> None:
+        repo = self.tmp / "safehouse_repo"
+        shutil.copytree(
+            REPO_ROOT / "bin",
+            repo / "bin",
+            ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+        )
+        shutil.copytree(
+            REPO_ROOT / "safehouse",
+            repo / "safehouse",
+            ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+        )
+        bin_doctor = repo / "bin" / "doctor"
+        bin_install = repo / "bin" / "install"
+        policies_dir = repo / "safehouse" / "policies"
+        base_policies = sorted(policies_dir.glob("*.sb"), key=lambda p: p.name)
+        total_policies = len(base_policies) + 2
+
+        for rel in (".homebrew/bin/safehouse", ".local/bin/junie"):
+            p = self.home / rel
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            p.chmod(0o755)
+
+        (policies_dir / "00-first.sb").write_text(";; First Policy\n(deny lsopen)\n\n", encoding="utf-8")
+        (policies_dir / "zz-last.sb").write_text(";; Last Policy\n(allow network-outbound)", encoding="utf-8")
+        (policies_dir / "ignored.txt").write_text("should not be included\n", encoding="utf-8")
+
+        inst = self._run(bin_install, ["safehouse"])
+        self.assertEqual(inst.returncode, 0, inst.stdout + inst.stderr)
+        self.assertIn(f"from {total_policies} policy file(s)", inst.stdout)
+
+        profile_path = self.home / ".config" / "safehouse" / "junie-local.sb"
+        content = profile_path.read_text(encoding="utf-8")
+        self.assertNotIn("should not be included", content)
+        self.assertLess(content.index(";; First Policy"), content.index('(subpath "/Applications")'))
+        self.assertLess(content.index('(home-subpath "/.homebrew")'), content.index(";; Last Policy"))
+
+        doc_ok = self._run(bin_doctor, ["safehouse"])
+        self.assertEqual(doc_ok.returncode, 0, doc_ok.stdout + doc_ok.stderr)
+        self.assertIn(f"{total_policies} policy file(s)", doc_ok.stdout)
+
+        # Updating a policy file causes doctor to fail until install re-syncs.
+        (policies_dir / "zz-last.sb").write_text(";; Last Policy\n;; Updated\n", encoding="utf-8")
+        doc_stale = self._run(bin_doctor, ["safehouse"])
+        self.assertEqual(doc_stale.returncode, 1)
+        self.assertIn("sha256 mismatch: ~/.config/safehouse/junie-local.sb", doc_stale.stdout)
+
+        reinst = self._run(bin_install, ["safehouse"])
+        self.assertEqual(reinst.returncode, 0, reinst.stdout + reinst.stderr)
+        self.assertIn(";; Updated\n", profile_path.read_text(encoding="utf-8"))
+
+        # Empty policy file fails cleanly.
+        (policies_dir / "zz-last.sb").write_text("\n   \n", encoding="utf-8")
+        doc_blank = self._run(bin_doctor, ["safehouse"])
+        self.assertEqual(doc_blank.returncode, 1)
+        self.assertIn("policy file is empty: zz-last.sb", doc_blank.stdout)
+
+        # Empty policies directory fails cleanly.
+        for sb in policies_dir.glob("*.sb"):
+            sb.unlink()
+        doc_empty = self._run(bin_doctor, ["safehouse"])
+        self.assertEqual(doc_empty.returncode, 1)
+        self.assertIn("no *.sb policy files found", doc_empty.stdout)
+        inst_empty = self._run(bin_install, ["safehouse"])
+        self.assertEqual(inst_empty.returncode, 1)
+        self.assertIn("no *.sb policy files found", inst_empty.stdout)
 
 
 if __name__ == "__main__":

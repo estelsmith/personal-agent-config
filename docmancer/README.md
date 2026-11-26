@@ -12,7 +12,7 @@ Everything runs locally with SQLite, `sqlite-vec`, and Ollama (`embeddinggemma-2
 
 - **Depends on [`mise`](../mise/README.md)**: `mise` installs `pipx:docmancer` (with `embeddings-openai` and `pysocks`), and `docmancer/mise-env.toml` places `OPENAI_BASE_URL` and `OPENAI_API_KEY` into Mise's `conf.d` so `mise exec -- docmancer` behaves the same in terminals, IDEs, and sandboxes.
 - **Extends [`junie`](../junie/README.md)**: Installs `~/.junie/skills/docmancer/SKILL.md` so Junie knows when and how to search or index docs before working with external libraries.
-- **Works inside [`safehouse`](../safehouse/README.md)**: `safehouse/junie-local.sb` grants sandboxed Junie sessions read/write access to `~/.docmancer`, letting the agent query and refresh the index safely from inside the sandbox.
+- **Works inside [`safehouse`](../safehouse/README.md)**: `safehouse/policies/docmancer.sb` grants sandboxed Junie sessions read/write access to `~/.docmancer`, letting the agent query and refresh the index safely from inside the sandbox.
 
 ## How It Works
 
@@ -51,7 +51,7 @@ Three pieces work together:
    ```bash
    ollama pull embeddinggemma-2:740m
    ```
-3. *(If running Junie inside Agent Safehouse)*: [`safehouse/junie-local.sb`](../safehouse/junie-local.sb) grants read/write access to `~/.docmancer` so sandboxed agents can read and update the local index.
+3. *(If running Junie inside Agent Safehouse)*: [`safehouse/policies/docmancer.sb`](../safehouse/policies/docmancer.sb) grants read/write access to `~/.docmancer` so sandboxed agents can read and update the local index.
 
 ## Quick Start
 

@@ -1,4 +1,4 @@
 # <mode> <source> <target> [sync|seed]
 0755 junie-safehouse  ~/bin/junie-safehouse
-0644 junie-local.sb   ~/.config/safehouse/junie-local.sb
+# ~/.config/safehouse/junie-local.sb is built from policies/*.sb by hooks/post-install.
 # ~/.jetbrains/acp.json is rendered from acp.json (${HOME} expanded) by hooks/post-install.

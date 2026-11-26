@@ -1,0 +1,25 @@
+;; Block direct execution of macOS .app bundles across system and user app directories.
+(deny process-exec
+    (subpath "/Applications")
+    (subpath "/System/Volumes/Data/Applications")
+    (subpath "/System/Applications")
+    (subpath "/System/Cryptexes/App/System/Applications")
+    (home-subpath "/Applications")
+)
+
+;; Keep Docker CLI tools and plugins working under --enable=docker
+;; (/usr/local/bin/docker* symlinks into Docker.app/Contents/Resources/{bin,cli-plugins}),
+;; while still denying Docker Desktop GUI binaries in Docker.app/Contents/MacOS.
+(allow process-exec
+    (subpath "/Applications/Docker.app/Contents/Resources/bin")
+    (subpath "/Applications/Docker.app/Contents/Resources/cli-plugins")
+    (subpath "/System/Volumes/Data/Applications/Docker.app/Contents/Resources/bin")
+    (subpath "/System/Volumes/Data/Applications/Docker.app/Contents/Resources/cli-plugins")
+)
+
+;; Defense-in-depth against launching apps via Launch Services or AppleScript.
+(deny lsopen)
+(deny process-exec
+    (literal "/usr/bin/open")
+    (literal "/usr/bin/osascript")
+)

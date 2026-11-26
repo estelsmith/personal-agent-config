@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Health check hook for safehouse wrapper, binaries, and ACP config."""
+"""Health check hook for safehouse wrapper, binaries, local profile, and ACP config."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ import os
 import sys
 from pathlib import Path
 
-from _safehouse import check_acp_json
+from _safehouse import check_acp_json, check_local_profile
 
 
 def check_executable(path: Path, label: str) -> bool:
@@ -30,6 +30,7 @@ def main() -> int:
     wrapper = home / "bin" / "junie-safehouse"
     safehouse_bin = home / ".homebrew" / "bin" / "safehouse"
     junie_bin = home / ".local" / "bin" / "junie"
+    local_profile = home / ".config" / "safehouse" / "junie-local.sb"
     acp_json = home / ".jetbrains" / "acp.json"
 
     if not check_executable(wrapper, "wrapper script"):
@@ -37,6 +38,11 @@ def main() -> int:
     if not check_executable(safehouse_bin, "safehouse binary"):
         ok = False
     if not check_executable(junie_bin, "junie binary"):
+        ok = False
+
+    profile_ok, profile_msg = check_local_profile(system_dir, local_profile)
+    print(profile_msg)
+    if not profile_ok:
         ok = False
 
     acp_ok, acp_msg = check_acp_json(system_dir, acp_json, home=home)
