@@ -908,23 +908,31 @@ def load_state():
 def save_state(state):
     state_path.write_text(json.dumps(state), encoding="utf-8")
 
-def ensure_docmancer_bins(ver, extras):
+def ensure_docmancer_bins(ver, extras, with_pkgs=""):
     base = home / ".local" / "share" / "mise" / "installs" / "pipx-docmancer" / ver
     py_bin = base / "docmancer" / "bin" / "python"
     doc_bin = base / "bin" / "docmancer"
     marker = base / "extras.txt"
+    with_marker = base / "with.txt"
     py_bin.parent.mkdir(parents=True, exist_ok=True)
     doc_bin.parent.mkdir(parents=True, exist_ok=True)
     marker.write_text(extras, encoding="utf-8")
+    with_marker.write_text(with_pkgs, encoding="utf-8")
     py_bin.write_text(
         f'''#!{{sys.executable}}
 import sys
 from pathlib import Path
 extras = Path({{str(marker)!r}}).read_text(encoding="utf-8").split(",")
+with_pkgs = [p.lower() for p in Path({{str(with_marker)!r}}).read_text(encoding="utf-8").split(",") if p]
 if len(sys.argv) >= 3 and sys.argv[1] == "-c" and "import openai" in sys.argv[2]:
     if "embeddings-openai" in extras:
         sys.exit(0)
     print("ModuleNotFoundError: No module named 'openai'", file=sys.stderr)
+    sys.exit(1)
+if len(sys.argv) >= 3 and sys.argv[1] == "-c" and "import socks" in sys.argv[2]:
+    if "pysocks" in with_pkgs:
+        sys.exit(0)
+    print("ModuleNotFoundError: No module named 'socks'", file=sys.stderr)
     sys.exit(1)
 sys.exit(0)
 ''',
@@ -970,9 +978,9 @@ if args[:2] == ["use", "--global"]:
         tools[name] = {{"version": ver, "options": opts}}
         # Mimic real mise: only install if not already installed at that version.
         if name not in inst_map or inst_map[name].get("version") != ver:
-            inst_map[name] = {{"version": ver, "extras": opts.get("extras", "")}}
+            inst_map[name] = {{"version": ver, "extras": opts.get("extras", ""), "with": opts.get("with", "")}}
             if name == "pipx:docmancer":
-                ensure_docmancer_bins(ver, opts.get("extras", ""))
+                ensure_docmancer_bins(ver, opts.get("extras", ""), opts.get("with", ""))
     write_tools(tools)
     save_state(state)
     sys.exit(0)
@@ -985,9 +993,10 @@ if args[:2] == ["install", "--force"]:
         name, ver, _ = parse_cli_spec(spec)
         cfg_spec = tools.get(name, {{"version": ver, "options": {{}}}})
         extras = cfg_spec["options"].get("extras", "")
-        inst_map[name] = {{"version": cfg_spec["version"], "extras": extras}}
+        with_pkgs = cfg_spec["options"].get("with", "")
+        inst_map[name] = {{"version": cfg_spec["version"], "extras": extras, "with": with_pkgs}}
         if name == "pipx:docmancer":
-            ensure_docmancer_bins(cfg_spec["version"], extras)
+            ensure_docmancer_bins(cfg_spec["version"], extras, with_pkgs)
     save_state(state)
     sys.exit(0)
 
@@ -1016,7 +1025,8 @@ if args == ["which", "docmancer"]:
     state = load_state()
     inst_info = state.get("installed_tools", {{}}).get("pipx:docmancer")
     extras = inst_info["extras"] if inst_info else spec["options"].get("extras", "")
-    doc_bin = ensure_docmancer_bins(ver, extras)
+    with_pkgs = inst_info.get("with", "") if inst_info else spec["options"].get("with", "")
+    doc_bin = ensure_docmancer_bins(ver, extras, with_pkgs)
     print(str(doc_bin))
     sys.exit(0)
 
@@ -1121,7 +1131,7 @@ sys.exit(0)
             self.assertIn('python = "3.15"', cfg_text)
             self.assertIn('uv = "0.13.10"', cfg_text)
             self.assertIn(
-                '"pipx:docmancer" = { version = "0.9.17", extras = "embeddings-openai" }',
+                '"pipx:docmancer" = { version = "0.9.17", extras = "embeddings-openai", with = "pysocks" }',
                 cfg_text,
             )
 
@@ -1160,7 +1170,10 @@ sys.exit(0)
             )
             doc_old = self._run(BIN_DOCTOR, ["mise"], extra_env=extra_env)
             self.assertEqual(doc_old.returncode, 1)
-            self.assertIn("expected 'pipx:docmancer[extras=embeddings-openai]@0.9.17'", doc_old.stdout)
+            self.assertIn(
+                "expected 'pipx:docmancer[extras=embeddings-openai,with=pysocks]@0.9.17'",
+                doc_old.stdout,
+            )
 
             mise_log.unlink(missing_ok=True)
             upgrade_inst = self._run(BIN_INSTALL, ["mise"], extra_env=extra_env)
@@ -1220,7 +1233,7 @@ sys.exit(0)
         self.assertEqual(doc_before_tools.returncode, 1)
         self.assertIn("mise exec -- docmancer --version failed", doc_before_tools.stdout)
 
-        # Configure global tools without embeddings-openai extra: doctor fails on missing openai.
+        # Configure global tools without embeddings-openai extra or pysocks: doctor fails on both.
         cfg_toml = self.home / ".config" / "mise" / "config.toml"
         cfg_toml.write_text(
             '[tools]\n"pipx:docmancer" = "0.9.17"\npython = "3.15"\nuv = "0.13.10"\n',
@@ -1229,10 +1242,21 @@ sys.exit(0)
         doc_missing_extra = self._run(BIN_DOCTOR, ["docmancer"])
         self.assertEqual(doc_missing_extra.returncode, 1)
         self.assertIn("missing the 'embeddings-openai' extra", doc_missing_extra.stdout)
+        self.assertIn("missing the 'pysocks' dependency", doc_missing_extra.stdout)
 
-        # Configure global tools with embeddings-openai extra and confirm docmancer doctor passes.
+        # Configure global tools with embeddings-openai extra only: doctor fails on missing pysocks.
         cfg_toml.write_text(
             '[tools]\n"pipx:docmancer" = { version = "0.9.17", extras = "embeddings-openai" }\npython = "3.15"\nuv = "0.13.10"\n',
+            encoding="utf-8",
+        )
+        doc_missing_socks = self._run(BIN_DOCTOR, ["docmancer"])
+        self.assertEqual(doc_missing_socks.returncode, 1)
+        self.assertIn("[OK] docmancer embeddings-openai extra (openai) is installed", doc_missing_socks.stdout)
+        self.assertIn("missing the 'pysocks' dependency", doc_missing_socks.stdout)
+
+        # Configure global tools with embeddings-openai extra and pysocks: docmancer doctor passes.
+        cfg_toml.write_text(
+            '[tools]\n"pipx:docmancer" = { version = "0.9.17", extras = "embeddings-openai", with = "pysocks" }\npython = "3.15"\nuv = "0.13.10"\n',
             encoding="utf-8",
         )
         doc_ok = self._run(BIN_DOCTOR, ["docmancer"])
@@ -1240,6 +1264,7 @@ sys.exit(0)
         self.assertIn("OPENAI_BASE_URL=http://localhost:11434/v1", doc_ok.stdout)
         self.assertIn("[OK] mise exec -- docmancer (docmancer 0.9.17)", doc_ok.stdout)
         self.assertIn("[OK] docmancer embeddings-openai extra (openai) is installed", doc_ok.stdout)
+        self.assertIn("[OK] docmancer pysocks dependency (socks) is installed", doc_ok.stdout)
 
         # If conf.d env vars are removed, docmancer doctor detects the missing env vars.
         conf_d_path.write_text("[env]\n", encoding="utf-8")

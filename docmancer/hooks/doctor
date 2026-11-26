@@ -106,7 +106,7 @@ def main() -> int:
             if interp is None:
                 print(
                     f"[FAIL] could not determine Python interpreter for {doc_bin} "
-                    "to verify 'embeddings-openai' extra"
+                    "to verify 'embeddings-openai' extra and 'pysocks' dependency"
                 )
                 ok = False
             else:
@@ -124,6 +124,21 @@ def main() -> int:
                     ok = False
                 else:
                     print("[OK] docmancer embeddings-openai extra (openai) is installed")
+
+                socks_res = subprocess.run(
+                    [interp, "-c", "import socks"],
+                    cwd=str(home),
+                    capture_output=True,
+                    text=True,
+                )
+                if socks_res.returncode != 0:
+                    print(
+                        "[FAIL] docmancer is missing the 'pysocks' dependency "
+                        "(run bin/install mise or ~/bin/mise install --force pipx:docmancer)"
+                    )
+                    ok = False
+                else:
+                    print("[OK] docmancer pysocks dependency (socks) is installed")
 
     return 0 if ok else 1
 
