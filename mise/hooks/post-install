@@ -1,0 +1,51 @@
+#!/usr/bin/env python3
+"""Post-install hook for mise: install ~/bin/mise, activate in ~/.bash_profile, and apply global tools."""
+
+from __future__ import annotations
+
+import os
+import sys
+from pathlib import Path
+
+from _mise import (
+    ensure_mise_binary,
+    load_desired_tools,
+    sync_bash_profile,
+    sync_global_tools,
+)
+
+
+def main() -> int:
+    home = Path.home()
+    system_dir = Path(os.environ.get("SYSTEM_DIR") or Path(__file__).resolve().parent.parent)
+    mise_bin = home / "bin" / "mise"
+    bash_profile = home / ".bash_profile"
+    config_toml = home / ".config" / "mise" / "config.toml"
+
+    bin_status, bin_msg = ensure_mise_binary(mise_bin)
+    print(bin_msg)
+    if bin_status == "error":
+        return 1
+
+    prof_status, prof_msg = sync_bash_profile(bash_profile)
+    print(prof_msg)
+    if prof_status == "error":
+        return 1
+
+    try:
+        desired_tools = load_desired_tools(system_dir)
+    except Exception as exc:
+        print(f"[FAIL] could not load mise/tools.toml: {exc}")
+        return 1
+
+    tools_ok, tool_msgs = sync_global_tools(mise_bin, config_toml, desired_tools, home)
+    for msg in tool_msgs:
+        print(msg)
+    if not tools_ok:
+        return 1
+
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

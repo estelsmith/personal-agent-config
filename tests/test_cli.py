@@ -184,7 +184,10 @@ sys.exit(0)
     def test_list_and_unknown_system(self) -> None:
         res = self._run(BIN_DOCTOR, ["--list"])
         self.assertEqual(res.returncode, 0, res.stderr)
-        self.assertEqual(res.stdout.splitlines(), ["litellm-proxy", "safehouse"])
+        self.assertEqual(
+            res.stdout.splitlines(),
+            ["docmancer", "litellm-proxy", "mise", "safehouse"],
+        )
 
         bad = self._run(BIN_DOCTOR, ["does-not-exist"])
         self.assertEqual(bad.returncode, 2)
@@ -850,6 +853,269 @@ sys.exit(0)
             "    - hooks/post-install failed (exit 1): Error: Docker daemon is not running or not reachable",
             inst_failed_section,
         )
+
+    def _fake_mise_script(self, log_path: Path, *, installed_tools: bool = True) -> str:
+        return f"""#!/usr/bin/env python3
+import json
+import os
+import sys
+from pathlib import Path
+
+log_file = Path({str(log_path)!r})
+with log_file.open("a", encoding="utf-8") as fh:
+    fh.write(" ".join(sys.argv[1:]) + "\\n")
+
+args = sys.argv[1:]
+home = Path.home()
+cfg_path = home / ".config" / "mise" / "config.toml"
+conf_d = home / ".config" / "mise" / "conf.d"
+state_path = home / ".fake_mise_installed.json"
+
+def load_tools():
+    if not cfg_path.is_file():
+        return {{}}
+    tools = {{}}
+    in_tools = False
+    for line in cfg_path.read_text(encoding="utf-8").splitlines():
+        s = line.strip()
+        if not s or s.startswith("#"):
+            continue
+        if s.startswith("[") and s.endswith("]"):
+            in_tools = s[1:-1].strip() == "tools"
+            continue
+        if in_tools and "=" in s:
+            k, v = s.split("=", 1)
+            tools[k.strip().strip('"')] = v.strip().strip('"')
+    return tools
+
+def load_conf_d_env():
+    env_map = {{}}
+    if conf_d.is_dir():
+        for p in sorted(conf_d.glob("*.toml")):
+            in_env = False
+            for line in p.read_text(encoding="utf-8").splitlines():
+                s = line.strip()
+                if not s or s.startswith("#"):
+                    continue
+                if s.startswith("[") and s.endswith("]"):
+                    in_env = s[1:-1].strip() == "env"
+                    continue
+                if in_env and "=" in s:
+                    k, v = s.split("=", 1)
+                    env_map[k.strip().strip('"')] = v.strip().strip('"')
+    return env_map
+
+if args == ["--version"]:
+    print("2026.11.14 macos-arm64 (fake)")
+    sys.exit(0)
+
+if args[:2] == ["use", "--global"]:
+    tools = load_tools()
+    for spec in args[2:]:
+        name, ver = spec.rsplit("@", 1)
+        tools[name] = ver
+    cfg_path.parent.mkdir(parents=True, exist_ok=True)
+    lines = ["[tools]"]
+    for k, v in sorted(tools.items()):
+        key_fmt = f'"{{k}}"' if ":" in k else k
+        lines.append(f'{{key_fmt}} = "{{v}}"')
+    cfg_path.write_text("\\n".join(lines) + "\\n", encoding="utf-8")
+    state_path.write_text(json.dumps({{"installed": True}}), encoding="utf-8")
+    sys.exit(0)
+
+if args == ["ls", "--global", "--json"]:
+    tools = load_tools()
+    is_installed = {installed_tools!r}
+    if state_path.is_file():
+        is_installed = json.loads(state_path.read_text(encoding="utf-8")).get("installed", is_installed)
+    out = {{}}
+    for name, ver in tools.items():
+        out[name] = [{{"version": ver, "requested_version": ver, "installed": is_installed, "active": is_installed}}]
+    print(json.dumps(out))
+    sys.exit(0)
+
+if args == ["env", "--json"]:
+    print(json.dumps(load_conf_d_env()))
+    sys.exit(0)
+
+if len(args) >= 3 and args[0] == "exec" and args[1] == "--":
+    cmd = args[2:]
+    if cmd == ["docmancer", "--version"]:
+        tools = load_tools()
+        if "pipx:docmancer" not in tools:
+            print("docmancer not installed", file=sys.stderr)
+            sys.exit(1)
+        print("docmancer 0.9.17")
+        sys.exit(0)
+
+sys.exit(0)
+"""
+
+    def test_mise_install_downloads_binary_syncs_bash_profile_and_global_tools(self) -> None:
+        mise_log = self.tmp / "mise.log"
+        fake_binary_bytes = self._fake_mise_script(mise_log).encode("utf-8")
+
+        class _MiseReleaseHandler(http.server.BaseHTTPRequestHandler):
+            def do_HEAD(self):
+                if self.path == "/releases/latest":
+                    self.send_response(302)
+                    self.send_header("Location", "/releases/tag/v2026.11.14")
+                    self.end_headers()
+                    return
+                if self.path == "/releases/tag/v2026.11.14":
+                    self.send_response(200)
+                    self.end_headers()
+                    return
+                self.send_response(404)
+                self.end_headers()
+
+            def do_GET(self):
+                if self.path == "/releases/latest":
+                    self.send_response(302)
+                    self.send_header("Location", "/releases/tag/v2026.11.14")
+                    self.end_headers()
+                    return
+                if self.path == "/releases/tag/v2026.11.14":
+                    self.send_response(200)
+                    self.end_headers()
+                    return
+                if self.path.startswith("/releases/download/v2026.11.14/mise-v2026.11.14-"):
+                    self.send_response(200)
+                    self.send_header("Content-Length", str(len(fake_binary_bytes)))
+                    self.end_headers()
+                    self.wfile.write(fake_binary_bytes)
+                    return
+                self.send_response(404)
+                self.end_headers()
+
+            def log_message(self, format, *args):
+                return
+
+        server = http.server.HTTPServer(("127.0.0.1", 0), _MiseReleaseHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        base_url = f"http://127.0.0.1:{server.server_address[1]}"
+        extra_env = {
+            "MISE_RELEASES_LATEST_URL": f"{base_url}/releases/latest",
+            "MISE_RELEASES_DOWNLOAD_BASE": f"{base_url}/releases/download",
+        }
+        try:
+            # Pre-install doctor fails because ~/bin/mise and ~/.bash_profile are missing.
+            pre = self._run(BIN_DOCTOR, ["mise"], extra_env=extra_env)
+            self.assertEqual(pre.returncode, 1)
+            self.assertIn("missing ~/bin/mise", pre.stdout)
+            self.assertIn("~/.bash_profile does not exist", pre.stdout)
+
+            # Seed ~/.bash_profile with commented hook + direnv hook to verify placement.
+            bash_profile = self.home / ".bash_profile"
+            bash_profile.write_text(
+                '# eval "$(mise activate bash)"\n'
+                'eval "$(/opt/homebrew/bin/brew shellenv)"\n'
+                'eval "$(direnv hook bash)"\n',
+                encoding="utf-8",
+            )
+            bash_profile.chmod(0o600)
+
+            inst = self._run(BIN_INSTALL, ["mise"], extra_env=extra_env)
+            self.assertEqual(inst.returncode, 0, inst.stdout + inst.stderr)
+            self.assertIn("[INSTALLED] ~/bin/mise", inst.stdout)
+            self.assertIn("[ADDED] ~/.bash_profile", inst.stdout)
+            self.assertIn("Configured and installed global mise tools", inst.stdout)
+
+            mise_bin = self.home / "bin" / "mise"
+            self.assertTrue(mise_bin.is_file())
+            self.assertEqual(stat.S_IMODE(mise_bin.stat().st_mode), 0o755)
+
+            profile_lines = bash_profile.read_text(encoding="utf-8").splitlines()
+            self.assertEqual(stat.S_IMODE(bash_profile.stat().st_mode), 0o600)
+            self.assertIn('eval "$(mise activate bash)"', profile_lines)
+            self.assertLess(
+                profile_lines.index('eval "$(mise activate bash)"'),
+                profile_lines.index('eval "$(direnv hook bash)"'),
+            )
+
+            cfg_toml = self.home / ".config" / "mise" / "config.toml"
+            cfg_text = cfg_toml.read_text(encoding="utf-8")
+            self.assertIn('python = "3.15"', cfg_text)
+            self.assertIn('uv = "0.13.10"', cfg_text)
+            self.assertIn('"pipx:docmancer" = "0.9.17"', cfg_text)
+
+            # Doctor passes now.
+            doc_ok = self._run(BIN_DOCTOR, ["mise"], extra_env=extra_env)
+            self.assertEqual(doc_ok.returncode, 0, doc_ok.stdout + doc_ok.stderr)
+
+            # Re-running install is idempotent and skips re-downloading or re-running mise use.
+            mise_log.unlink(missing_ok=True)
+            reinst = self._run(BIN_INSTALL, ["mise"], extra_env=extra_env)
+            self.assertEqual(reinst.returncode, 0, reinst.stdout + reinst.stderr)
+            self.assertIn("already installed", reinst.stdout)
+            self.assertIn("already includes", reinst.stdout)
+            self.assertIn("already configured and installed", reinst.stdout)
+            logged_cmds = mise_log.read_text(encoding="utf-8").splitlines()
+            self.assertFalse(any(c.startswith("use --global") for c in logged_cmds))
+
+            # Removing mise activate from ~/.bash_profile makes doctor fail.
+            bash_profile.write_text('eval "$(direnv hook bash)"\n', encoding="utf-8")
+            doc_missing_hook = self._run(BIN_DOCTOR, ["mise"], extra_env=extra_env)
+            self.assertEqual(doc_missing_hook.returncode, 1)
+            self.assertIn('missing `eval "$(mise activate bash)"`', doc_missing_hook.stdout)
+        finally:
+            server.shutdown()
+            server.server_close()
+
+    def test_docmancer_install_and_doctor(self) -> None:
+        mise_log = self.tmp / "docmancer_mise.log"
+        mise_bin = self.home / "bin" / "mise"
+        mise_bin.parent.mkdir(parents=True, exist_ok=True)
+        mise_bin.write_text(self._fake_mise_script(mise_log), encoding="utf-8")
+        mise_bin.chmod(0o755)
+
+        # Install docmancer files (--no-hooks first to test doctor before global tools exist).
+        inst_no_hooks = self._run(BIN_INSTALL, ["--no-hooks", "docmancer"])
+        self.assertEqual(inst_no_hooks.returncode, 0, inst_no_hooks.stdout + inst_no_hooks.stderr)
+        self.assertIn("installed=3", inst_no_hooks.stdout)
+
+        yaml_path = self.home / ".docmancer" / "docmancer.yaml"
+        conf_d_path = self.home / ".config" / "mise" / "conf.d" / "docmancer.toml"
+        skill_path = self.home / ".junie" / "skills" / "docmancer" / "SKILL.md"
+        self.assertTrue(yaml_path.is_file())
+        self.assertTrue(conf_d_path.is_file())
+        self.assertTrue(skill_path.is_file())
+
+        yaml_text = yaml_path.read_text(encoding="utf-8")
+        self.assertIn('db_path: "./docmancer.db"', yaml_text)
+        self.assertIn('provider: "openai"', yaml_text)
+        self.assertIn('model: "embeddinggemma-2:740m"', yaml_text)
+
+        conf_d_text = conf_d_path.read_text(encoding="utf-8")
+        self.assertIn('OPENAI_BASE_URL = "http://localhost:11434/v1"', conf_d_text)
+        self.assertIn('OPENAI_API_KEY = "ollama"', conf_d_text)
+
+        skill_text = skill_path.read_text(encoding="utf-8")
+        self.assertIn("mise exec -- docmancer", skill_text)
+        self.assertNotIn(".estel-local", skill_text)
+
+        # Doctor fails because pipx:docmancer is not yet configured in ~/.config/mise/config.toml.
+        doc_before_tools = self._run(BIN_DOCTOR, ["docmancer"])
+        self.assertEqual(doc_before_tools.returncode, 1)
+        self.assertIn("mise exec -- docmancer --version failed", doc_before_tools.stdout)
+
+        # Configure global tools (via fake mise) and confirm docmancer doctor passes.
+        cfg_toml = self.home / ".config" / "mise" / "config.toml"
+        cfg_toml.write_text(
+            '[tools]\n"pipx:docmancer" = "0.9.17"\npython = "3.15"\nuv = "0.13.10"\n',
+            encoding="utf-8",
+        )
+        doc_ok = self._run(BIN_DOCTOR, ["docmancer"])
+        self.assertEqual(doc_ok.returncode, 0, doc_ok.stdout + doc_ok.stderr)
+        self.assertIn("OPENAI_BASE_URL=http://localhost:11434/v1", doc_ok.stdout)
+        self.assertIn("[OK] mise exec -- docmancer (docmancer 0.9.17)", doc_ok.stdout)
+
+        # If conf.d env vars are removed, docmancer doctor detects the missing env vars.
+        conf_d_path.write_text("[env]\n", encoding="utf-8")
+        doc_no_env = self._run(BIN_DOCTOR, ["docmancer"])
+        self.assertEqual(doc_no_env.returncode, 1)
+        self.assertIn("Mise environment missing OPENAI_BASE_URL, OPENAI_API_KEY", doc_no_env.stdout)
 
 
 if __name__ == "__main__":

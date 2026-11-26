@@ -1,0 +1,4 @@
+# <mode> <source> <target> [sync|seed]
+0644 docmancer.yaml            ~/.docmancer/docmancer.yaml
+0644 mise-env.toml             ~/.config/mise/conf.d/docmancer.toml
+0644 skills/docmancer/SKILL.md ~/.junie/skills/docmancer/SKILL.md

@@ -1,0 +1,18 @@
+# @see https://docmancer.dev/docs/configuration
+
+index:
+    provider: "sqlite"
+    db_path: "./docmancer.db"
+    extracted_dir: "./extracted"
+
+vector_store:
+    provider: "sqlite-vec"
+    options: {}
+
+embeddings:
+    provider: "openai"             # OpenAI-compatible client -> pointed at Ollama
+    model: "embeddinggemma-2:740m" # must match a tag from `ollama list`
+    dimensions: 768                # EmbeddingGemma's native size
+
+retrieval:
+    profile: "local"

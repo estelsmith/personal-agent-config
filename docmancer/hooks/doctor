@@ -1,0 +1,77 @@
+#!/usr/bin/env python3
+"""Health check hook for docmancer (Mise environment injection and `mise exec -- docmancer`)."""
+
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+
+def main() -> int:
+    home = Path.home()
+    mise_bin = home / "bin" / "mise"
+
+    if not (mise_bin.is_file() and os.access(mise_bin, os.X_OK)):
+        print("[FAIL] ~/bin/mise is not installed or not executable (run bin/install mise)")
+        return 1
+
+    ok = True
+
+    env_res = subprocess.run(
+        [str(mise_bin), "env", "--json"],
+        cwd=str(home),
+        capture_output=True,
+        text=True,
+    )
+    if env_res.returncode != 0:
+        err = env_res.stderr.strip() or f"exit {env_res.returncode}"
+        print(f"[FAIL] mise env --json failed: {err}")
+        ok = False
+    else:
+        try:
+            mise_env = json.loads(env_res.stdout or "{}")
+        except json.JSONDecodeError as exc:
+            print(f"[FAIL] invalid JSON from mise env --json: {exc}")
+            mise_env = {}
+            ok = False
+
+        if isinstance(mise_env, dict):
+            missing = [
+                key
+                for key in ("OPENAI_BASE_URL", "OPENAI_API_KEY")
+                if not str(mise_env.get(key, "")).strip()
+            ]
+            if missing:
+                print(
+                    f"[FAIL] Mise environment missing {', '.join(missing)} "
+                    "(expected via ~/.config/mise/conf.d/docmancer.toml)"
+                )
+                ok = False
+            else:
+                print(
+                    f"[OK] Mise environment defines OPENAI_BASE_URL={mise_env['OPENAI_BASE_URL']} "
+                    "and OPENAI_API_KEY"
+                )
+
+    doc_res = subprocess.run(
+        [str(mise_bin), "exec", "--", "docmancer", "--version"],
+        cwd=str(home),
+        capture_output=True,
+        text=True,
+    )
+    if doc_res.returncode != 0:
+        err = doc_res.stderr.strip() or doc_res.stdout.strip() or f"exit {doc_res.returncode}"
+        print(f"[FAIL] mise exec -- docmancer --version failed: {err}")
+        ok = False
+    else:
+        ver = doc_res.stdout.strip().splitlines()[0] if doc_res.stdout.strip() else "unknown"
+        print(f"[OK] mise exec -- docmancer ({ver})")
+
+    return 0 if ok else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,6 +1,6 @@
 # Personal Agent Config
 
-Central repository for managing local AI agent tooling configurations (`litellm-proxy`, `safehouse`, and future systems) with a shared CLI for verifying and installing files.
+Central repository for managing local AI agent tooling configurations (`docmancer`, `litellm-proxy`, `mise`, `safehouse`, and future systems) with a shared CLI for verifying and installing files.
 
 ## Commands
 
