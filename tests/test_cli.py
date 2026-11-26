@@ -5,6 +5,7 @@ from __future__ import annotations
 import http.server
 import json
 import os
+import pty
 import shutil
 import stat
 import subprocess
@@ -123,6 +124,39 @@ sys.exit(0)
             stderr=subprocess.PIPE,
             text=True,
         )
+
+    def _run_tty(
+        self, cmd: Path, args: list[str], extra_env: dict[str, str] | None = None
+    ) -> tuple[int, str]:
+        env = self._base_env(extra_env)
+        env.pop("NO_COLOR", None)
+        master_fd, slave_fd = pty.openpty()
+        try:
+            proc = subprocess.Popen(
+                [str(cmd), *args],
+                env=env,
+                stdout=slave_fd,
+                stderr=slave_fd,
+                close_fds=True,
+            )
+        finally:
+            os.close(slave_fd)
+
+        chunks: list[bytes] = []
+        try:
+            while True:
+                try:
+                    data = os.read(master_fd, 4096)
+                except OSError:
+                    break
+                if not data:
+                    break
+                chunks.append(data)
+        finally:
+            os.close(master_fd)
+
+        rc = proc.wait()
+        return rc, b"".join(chunks).decode("utf-8", errors="replace")
 
     def _make_isolated_repo(self, *, repo_env_content: str | None = None) -> Path:
         repo = self.tmp / "repo"
@@ -685,6 +719,137 @@ sys.exit(0)
         finally:
             server.shutdown()
             server.server_close()
+
+    def test_install_status_line_colors_under_tty(self) -> None:
+        mini_repo = self.tmp / "color_repo"
+        shutil.copytree(
+            REPO_ROOT / "bin",
+            mini_repo / "bin",
+            ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+        )
+
+        alpha = mini_repo / "alpha"
+        alpha.mkdir(parents=True)
+        (alpha / "a.conf").write_text("a=1\n", encoding="utf-8")
+        (alpha / "manifest").write_text(
+            "0644 a.conf ~/.alpha/a.conf\n", encoding="utf-8"
+        )
+
+        beta = mini_repo / "beta"
+        (beta / "hooks").mkdir(parents=True)
+        (beta / "b.conf").write_text("b=1\n", encoding="utf-8")
+        (beta / "manifest").write_text(
+            "0644 b.conf ~/.beta/b.conf\n", encoding="utf-8"
+        )
+        fail_hook = beta / "hooks" / "post-install"
+        fail_hook.write_text("#!/bin/sh\necho 'Error: hook boom'\nexit 1\n", encoding="utf-8")
+        fail_hook.chmod(0o755)
+
+        bin_install = mini_repo / "bin" / "install"
+
+        # --dry-run with changes: yellow status line for alpha.
+        rc_dry, out_dry = self._run_tty(bin_install, ["--dry-run", "alpha"])
+        self.assertEqual(rc_dry, 0, out_dry)
+        self.assertIn(
+            "\033[33m  - alpha: installed=1, updated=0, seeded=0, unchanged=0, failed=0, hook=none\033[0m",
+            out_dry,
+        )
+
+        # Real install with changes: also yellow status line for alpha.
+        rc_inst, out_inst = self._run_tty(bin_install, ["alpha"])
+        self.assertEqual(rc_inst, 0, out_inst)
+        self.assertIn(
+            "\033[33m  - alpha: installed=1, updated=0, seeded=0, unchanged=0, failed=0, hook=none\033[0m",
+            out_inst,
+        )
+        self.assertNotIn("Failed Checks:", out_inst)
+
+        # Second run with no changes for alpha (green) and failing hook for beta (red even with install change).
+        rc_both, out_both = self._run_tty(bin_install, [])
+        self.assertEqual(rc_both, 1, out_both)
+        self.assertIn(
+            "\033[32m  - alpha: installed=0, updated=0, seeded=0, unchanged=1, failed=0, hook=none\033[0m",
+            out_both,
+        )
+        self.assertIn(
+            "\033[31m  - beta: installed=1, updated=0, seeded=0, unchanged=0, failed=1, hook=failed (exit 1)\033[0m",
+            out_both,
+        )
+        self.assertIn("Failed Checks:", out_both)
+        self.assertIn("hooks/post-install failed (exit 1): Error: hook boom", out_both)
+
+    def test_doctor_and_install_failed_checks_summary_at_bottom(self) -> None:
+        self._install_fake_docker(
+            containers=[
+                {"Service": "litellm", "State": "running", "Health": ""},
+                {
+                    "Service": "gemini-decision-adapter",
+                    "State": "running",
+                    "Health": "unhealthy",
+                },
+                {"Service": "db", "State": "running", "Health": "healthy"},
+            ]
+        )
+        repo = self._make_isolated_repo(repo_env_content=None)
+        bin_doctor = repo / "bin" / "doctor"
+        bin_install = repo / "bin" / "install"
+
+        # Add a custom third system with a failing doctor hook that prints no [FAIL] tag.
+        gamma = repo / "gamma"
+        (gamma / "hooks").mkdir(parents=True)
+        (gamma / "g.conf").write_text("ok\n", encoding="utf-8")
+        (gamma / "manifest").write_text(
+            "0644 g.conf ~/.gamma/g.conf\n", encoding="utf-8"
+        )
+        gamma_doc = gamma / "hooks" / "doctor"
+        gamma_doc.write_text("#!/bin/sh\necho 'gamma daemon down'\nexit 2\n", encoding="utf-8")
+        gamma_doc.chmod(0o755)
+
+        # Install litellm-proxy and gamma cleanly, leaving safehouse missing its binaries.
+        inst_ok = self._run(bin_install, ["gamma"])
+        self.assertEqual(inst_ok.returncode, 0, inst_ok.stdout + inst_ok.stderr)
+        self.assertNotIn("Failed Checks:", inst_ok.stdout)
+
+        inst_lp = self._run(bin_install, ["litellm-proxy"])
+        self.assertEqual(inst_lp.returncode, 0, inst_lp.stdout + inst_lp.stderr)
+
+        # Doctor across gamma, litellm-proxy, and safehouse shows Failed Checks at the bottom after Summary.
+        doc = self._run(bin_doctor, [])
+        self.assertEqual(doc.returncode, 1)
+        summary_idx = doc.stdout.index("Summary:")
+        failed_idx = doc.stdout.index("Failed Checks:")
+        self.assertGreater(failed_idx, summary_idx)
+
+        failed_section = doc.stdout[failed_idx:]
+        self.assertIn("  - gamma:", failed_section)
+        self.assertIn("    - hooks/doctor failed (exit 2): gamma daemon down", failed_section)
+        self.assertIn("  - litellm-proxy:", failed_section)
+        self.assertIn(
+            "    - hooks/doctor: service 'gemini-decision-adapter' is unhealthy (state=running, health=unhealthy)",
+            failed_section,
+        )
+        self.assertIn("  - safehouse:", failed_section)
+        self.assertIn("    - missing: ~/bin/junie-safehouse", failed_section)
+        self.assertIn("    - hooks/doctor: missing safehouse binary:", failed_section)
+
+        # Install failure across multiple systems (directory target conflict + docker daemon down).
+        (self.home / ".gamma" / "g.conf").unlink()
+        (self.home / ".gamma" / "g.conf").mkdir()
+        self._install_fake_docker(daemon_ok=False)
+        inst_fail = self._run(bin_install, ["--force", "gamma", "litellm-proxy"])
+        self.assertEqual(inst_fail.returncode, 1)
+        status_idx = inst_fail.stdout.index("Install Status:")
+        inst_failed_idx = inst_fail.stdout.index("Failed Checks:")
+        self.assertGreater(inst_failed_idx, status_idx)
+
+        inst_failed_section = inst_fail.stdout[inst_failed_idx:]
+        self.assertIn("  - gamma:", inst_failed_section)
+        self.assertIn("    - target is a directory: ~/.gamma/g.conf", inst_failed_section)
+        self.assertIn("  - litellm-proxy:", inst_failed_section)
+        self.assertIn(
+            "    - hooks/post-install failed (exit 1): Error: Docker daemon is not running or not reachable",
+            inst_failed_section,
+        )
 
 
 if __name__ == "__main__":

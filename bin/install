@@ -8,16 +8,18 @@ import os
 import shutil
 import sys
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from _lib import (
     Style,
     discover_systems,
+    extract_hook_failures,
     file_mode,
     find_repo_root,
     format_mode,
     parse_manifest,
+    print_failed_checks,
     run_hook,
     select_systems,
     sha256_file,
@@ -33,6 +35,7 @@ class SystemReport:
     unchanged: int = 0
     failed: int = 0
     hook_status: str = "none"
+    failures: list[str] = field(default_factory=list)
 
 
 def _atomic_install(src: Path, dst: Path, mode: int) -> None:
@@ -82,11 +85,14 @@ def install_system(
                 }
             )
             print(f"  {style.cyan('[HOOK]')} running {system.name}/hooks/pre-install")
+            pre_lines: list[str] = []
             try:
-                rc = run_hook(pre_hook, env, indent="    ")
+                rc = run_hook(pre_hook, env, indent="    ", captured_lines=pre_lines)
             except PermissionError as exc:
-                print(f"  {style.red('[FAIL]')} {exc}")
+                msg = str(exc)
+                print(f"  {style.red('[FAIL]')} {msg}")
                 report.failed += 1
+                report.failures.append(msg)
                 report.hook_status = "pre-install failed"
                 return report
             if rc != 0:
@@ -94,6 +100,9 @@ def install_system(
                     f"  {style.red('[FAIL]')} {system.name}/hooks/pre-install failed (exit {rc})"
                 )
                 report.failed += 1
+                report.failures.extend(
+                    extract_hook_failures("pre-install", rc, pre_lines)
+                )
                 report.hook_status = f"pre-install failed (exit {rc})"
                 return report
 
@@ -101,23 +110,25 @@ def install_system(
         try:
             entries = parse_manifest(system)
         except ValueError as exc:
-            print(f"  {style.red('[FAIL]')} invalid manifest: {exc}")
+            msg = f"invalid manifest: {exc}"
+            print(f"  {style.red('[FAIL]')} {msg}")
             report.failed += 1
+            report.failures.append(msg)
             return report
 
         for entry in entries:
             if not entry.source.is_file():
-                print(
-                    f"  {style.red('[FAIL]')} missing repo source: {entry.rel_source}"
-                )
+                msg = f"missing repo source: {entry.rel_source}"
+                print(f"  {style.red('[FAIL]')} {msg}")
                 report.failed += 1
+                report.failures.append(msg)
                 continue
 
             if entry.target.is_dir() and not entry.target.is_symlink():
-                print(
-                    f"  {style.red('[FAIL]')} target is a directory: {entry.raw_target}"
-                )
+                msg = f"target is a directory: {entry.raw_target}"
+                print(f"  {style.red('[FAIL]')} {msg}")
                 report.failed += 1
+                report.failures.append(msg)
                 continue
 
             exists = entry.target.exists() or entry.target.is_symlink()
@@ -138,10 +149,10 @@ def install_system(
                     try:
                         _atomic_install(entry.source, entry.target, entry.mode)
                     except OSError as exc:
-                        print(
-                            f"  {style.red('[FAIL]')} could not seed {entry.raw_target}: {exc}"
-                        )
+                        msg = f"could not seed {entry.raw_target}: {exc}"
+                        print(f"  {style.red('[FAIL]')} {msg}")
                         report.failed += 1
+                        report.failures.append(msg)
                     else:
                         print(
                             f"  {style.yellow('[SEEDED]')} {entry.raw_target} "
@@ -162,10 +173,10 @@ def install_system(
                     try:
                         _atomic_install(entry.source, entry.target, entry.mode)
                     except OSError as exc:
-                        print(
-                            f"  {style.red('[FAIL]')} could not install {entry.raw_target}: {exc}"
-                        )
+                        msg = f"could not install {entry.raw_target}: {exc}"
+                        print(f"  {style.red('[FAIL]')} {msg}")
                         report.failed += 1
+                        report.failures.append(msg)
                     else:
                         print(
                             f"  {style.green('[INSTALLED]')} {entry.raw_target} "
@@ -181,10 +192,10 @@ def install_system(
                 dst_hash = "" if broken_symlink else sha256_file(entry.target)
                 actual_mode = None if broken_symlink else file_mode(entry.target)
             except OSError as exc:
-                print(
-                    f"  {style.red('[FAIL]')} cannot inspect {entry.raw_target}: {exc}"
-                )
+                msg = f"cannot inspect {entry.raw_target}: {exc}"
+                print(f"  {style.red('[FAIL]')} {msg}")
                 report.failed += 1
+                report.failures.append(msg)
                 continue
 
             needs_content = force or entry.target.is_symlink() or (src_hash != dst_hash)
@@ -209,10 +220,10 @@ def install_system(
                     try:
                         _atomic_install(entry.source, entry.target, entry.mode)
                     except OSError as exc:
-                        print(
-                            f"  {style.red('[FAIL]')} could not update {entry.raw_target}: {exc}"
-                        )
+                        msg = f"could not update {entry.raw_target}: {exc}"
+                        print(f"  {style.red('[FAIL]')} {msg}")
                         report.failed += 1
+                        report.failures.append(msg)
                     else:
                         print(
                             f"  {style.yellow('[UPDATED]')} {entry.raw_target} ({reason})"
@@ -230,10 +241,10 @@ def install_system(
                     try:
                         os.chmod(entry.target, entry.mode)
                     except OSError as exc:
-                        print(
-                            f"  {style.red('[FAIL]')} could not chmod {entry.raw_target}: {exc}"
-                        )
+                        msg = f"could not chmod {entry.raw_target}: {exc}"
+                        print(f"  {style.red('[FAIL]')} {msg}")
                         report.failed += 1
+                        report.failures.append(msg)
                     else:
                         print(
                             f"  {style.yellow('[UPDATED]')} {entry.raw_target} ({reason})"
@@ -276,11 +287,14 @@ def install_system(
                 }
             )
             print(f"  {style.cyan('[HOOK]')} running {system.name}/hooks/post-install")
+            post_lines: list[str] = []
             try:
-                rc = run_hook(post_hook, env, indent="    ")
+                rc = run_hook(post_hook, env, indent="    ", captured_lines=post_lines)
             except PermissionError as exc:
-                print(f"  {style.red('[FAIL]')} {exc}")
+                msg = str(exc)
+                print(f"  {style.red('[FAIL]')} {msg}")
                 report.failed += 1
+                report.failures.append(msg)
                 report.hook_status = "failed (not executable)"
             else:
                 if rc == 0:
@@ -293,6 +307,9 @@ def install_system(
                         f"  {style.red('[FAIL]')} {system.name}/hooks/post-install failed (exit {rc})"
                     )
                     report.failed += 1
+                    report.failures.extend(
+                        extract_hook_failures("post-install", rc, post_lines)
+                    )
                     report.hook_status = f"failed (exit {rc})"
 
     return report
@@ -381,9 +398,14 @@ def main(argv: list[str] | None = None) -> int:
         if r.failed > 0:
             print(style.red(line))
         elif r.installed + r.updated + r.seeded > 0:
-            print(style.yellow(line) if args.dry_run else style.green(line))
+            print(style.yellow(line))
         else:
             print(style.green(line))
+
+    if total_failed > 0:
+        print_failed_checks(
+            [(r.name, r.failures) for r in reports if r.failures], style
+        )
 
     return 1 if total_failed > 0 else 0
 

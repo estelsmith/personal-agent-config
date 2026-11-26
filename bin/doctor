@@ -6,26 +6,36 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from _lib import (
     Style,
     discover_systems,
+    extract_hook_failures,
     file_mode,
     find_repo_root,
     format_mode,
     parse_manifest,
+    print_failed_checks,
     run_hook,
     select_systems,
     sha256_file,
 )
 
 
-def check_system(repo_root: Path, system, style: Style) -> tuple[int, int, int]:
-    """Run file and hook checks for one system. Returns (passed, warned, failed)."""
-    passed = 0
-    warned = 0
-    failed = 0
+@dataclass
+class DoctorReport:
+    name: str
+    passed: int = 0
+    warned: int = 0
+    failed: int = 0
+    failures: list[str] = field(default_factory=list)
+
+
+def check_system(repo_root: Path, system, style: Style) -> DoctorReport:
+    """Run file and hook checks for one system."""
+    report = DoctorReport(name=system.name)
 
     print(style.bold(f"==> {system.name}"))
 
@@ -33,37 +43,40 @@ def check_system(repo_root: Path, system, style: Style) -> tuple[int, int, int]:
         try:
             entries = parse_manifest(system)
         except ValueError as exc:
-            print(f"  {style.red('[FAIL]')} invalid manifest: {exc}")
-            return 0, 0, 1
+            msg = f"invalid manifest: {exc}"
+            print(f"  {style.red('[FAIL]')} {msg}")
+            report.failed += 1
+            report.failures.append(msg)
+            return report
 
         for entry in entries:
             if not entry.source.is_file():
-                print(
-                    f"  {style.red('[FAIL]')} missing repo source: {entry.rel_source}"
-                )
-                failed += 1
+                msg = f"missing repo source: {entry.rel_source}"
+                print(f"  {style.red('[FAIL]')} {msg}")
+                report.failed += 1
+                report.failures.append(msg)
                 continue
 
             if not entry.target.exists() and not entry.target.is_symlink():
                 kind_note = f" (seed from {entry.rel_source})" if entry.kind == "seed" else ""
-                print(
-                    f"  {style.red('[FAIL]')} missing: {entry.raw_target} ({entry.target}){kind_note}"
-                )
-                failed += 1
+                msg = f"missing: {entry.raw_target} ({entry.target}){kind_note}"
+                print(f"  {style.red('[FAIL]')} {msg}")
+                report.failed += 1
+                report.failures.append(msg)
                 continue
 
             if entry.target.is_dir():
-                print(
-                    f"  {style.red('[FAIL]')} expected file, found directory: {entry.raw_target}"
-                )
-                failed += 1
+                msg = f"expected file, found directory: {entry.raw_target}"
+                print(f"  {style.red('[FAIL]')} {msg}")
+                report.failed += 1
+                report.failures.append(msg)
                 continue
 
             if entry.target.is_symlink() and not entry.target.exists():
-                print(
-                    f"  {style.red('[FAIL]')} broken symlink: {entry.raw_target} -> {os.readlink(entry.target)}"
-                )
-                failed += 1
+                msg = f"broken symlink: {entry.raw_target} -> {os.readlink(entry.target)}"
+                print(f"  {style.red('[FAIL]')} {msg}")
+                report.failed += 1
+                report.failures.append(msg)
                 continue
 
             try:
@@ -74,42 +87,46 @@ def check_system(repo_root: Path, system, style: Style) -> tuple[int, int, int]:
                             f"  {style.yellow('[WARN]')} {entry.raw_target} "
                             f"(seed present; mode {format_mode(actual_mode)} is looser than {format_mode(entry.mode)})"
                         )
-                        warned += 1
+                        report.warned += 1
                     else:
                         print(
                             f"  {style.green('[OK]')} {entry.raw_target} "
                             f"(seed present, mode {format_mode(actual_mode)})"
                         )
-                        passed += 1
+                        report.passed += 1
                     continue
 
                 src_hash = sha256_file(entry.source)
                 dst_hash = sha256_file(entry.target)
             except OSError as exc:
-                print(
-                    f"  {style.red('[FAIL]')} cannot inspect {entry.raw_target}: {exc}"
-                )
-                failed += 1
+                msg = f"cannot inspect {entry.raw_target}: {exc}"
+                print(f"  {style.red('[FAIL]')} {msg}")
+                report.failed += 1
+                report.failures.append(msg)
                 continue
 
             if src_hash != dst_hash:
-                print(
-                    f"  {style.red('[FAIL]')} sha256 mismatch: {entry.raw_target} "
+                msg = (
+                    f"sha256 mismatch: {entry.raw_target} "
                     f"(repo {src_hash[:12]} != local {dst_hash[:12]})"
                 )
-                failed += 1
+                print(f"  {style.red('[FAIL]')} {msg}")
+                report.failed += 1
+                report.failures.append(msg)
             elif actual_mode != entry.mode:
-                print(
-                    f"  {style.red('[FAIL]')} mode mismatch: {entry.raw_target} "
+                msg = (
+                    f"mode mismatch: {entry.raw_target} "
                     f"(expected {format_mode(entry.mode)}, got {format_mode(actual_mode)})"
                 )
-                failed += 1
+                print(f"  {style.red('[FAIL]')} {msg}")
+                report.failed += 1
+                report.failures.append(msg)
             else:
                 print(
                     f"  {style.green('[OK]')} {entry.raw_target} "
                     f"(sha256 {src_hash[:12]}, mode {format_mode(actual_mode)})"
                 )
-                passed += 1
+                report.passed += 1
 
     doctor_hook = system.hook("doctor")
     if doctor_hook is not None:
@@ -122,22 +139,28 @@ def check_system(repo_root: Path, system, style: Style) -> tuple[int, int, int]:
             }
         )
         print(f"  {style.cyan('[HOOK]')} running {system.name}/hooks/doctor")
+        hook_lines: list[str] = []
         try:
-            rc = run_hook(doctor_hook, env, indent="    ")
+            rc = run_hook(doctor_hook, env, indent="    ", captured_lines=hook_lines)
         except PermissionError as exc:
-            print(f"  {style.red('[FAIL]')} {exc}")
-            failed += 1
+            msg = str(exc)
+            print(f"  {style.red('[FAIL]')} {msg}")
+            report.failed += 1
+            report.failures.append(msg)
         else:
             if rc == 0:
                 print(f"  {style.green('[OK]')} {system.name}/hooks/doctor passed")
-                passed += 1
+                report.passed += 1
             else:
                 print(
                     f"  {style.red('[FAIL]')} {system.name}/hooks/doctor failed (exit {rc})"
                 )
-                failed += 1
+                report.failed += 1
+                report.failures.extend(
+                    extract_hook_failures("doctor", rc, hook_lines)
+                )
 
-    return passed, warned, failed
+    return report
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
@@ -178,17 +201,15 @@ def main(argv: list[str] | None = None) -> int:
         print("No systems discovered.")
         return 0
 
-    total_passed = 0
-    total_warned = 0
-    total_failed = 0
-
+    reports: list[DoctorReport] = []
     for idx, system in enumerate(systems):
         if idx > 0:
             print()
-        p, w, f = check_system(repo_root, system, style)
-        total_passed += p
-        total_warned += w
-        total_failed += f
+        reports.append(check_system(repo_root, system, style))
+
+    total_passed = sum(r.passed for r in reports)
+    total_warned = sum(r.warned for r in reports)
+    total_failed = sum(r.failed for r in reports)
 
     print()
     summary = (
@@ -197,6 +218,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     if total_failed > 0:
         print(style.red(summary))
+        print_failed_checks(
+            [(r.name, r.failures) for r in reports if r.failures], style
+        )
         return 1
     if total_warned > 0:
         print(style.yellow(summary))

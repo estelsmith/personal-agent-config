@@ -11,6 +11,7 @@ Checks configuration sync and health across all discovered systems (or only the 
 - Verifies every `sync` file in each system's `manifest` exists, matches the repository file's SHA-256 hash, and has the expected file mode.
 - Verifies every `seed` file (such as `~/litellm-proxy/.env`) exists and checks its permissions without requiring a hash match.
 - Runs `<system>/hooks/doctor` (if present) for system-specific health checks (e.g., `litellm-proxy` Docker Compose stack state/health, `.env` keys, and `~/.bash_profile` `LITELLM_MASTER_KEY` sync; `safehouse` executable/binary prerequisites and ACP config).
+- Prints a summary line and, when any checks fail, a bottom `Failed Checks:` breakdown by system.
 
 ### `bin/install [OPTIONS] [SYSTEM ...]`
 
@@ -19,7 +20,7 @@ Installs missing or mismatched files and runs system lifecycle hooks:
 - Installs missing `sync` files and atomically updates files whose SHA-256 hash or permissions differ.
 - Seeds missing `seed` files (such as `.env.example` -> `~/litellm-proxy/.env`) while preserving existing local files; `sync-or-seed` (`<primary>|<seed>`) syncs the primary file (such as a gitignored `.env`) when present in the repo and falls back to seeding from `<seed>` when absent.
 - Runs `<system>/hooks/pre-install` (before file sync) and `<system>/hooks/post-install` (after file sync, e.g., `litellm-proxy` syncing `LITELLM_MASTER_KEY` into `~/.bash_profile` and pulling/building/restarting the Docker Compose stack when files changed, or checking stack health and only starting it if stopped or unhealthy when unchanged).
-- Prints a per-system summary report.
+- Prints a per-system summary report (green when unchanged, yellow when changes occur, red on failures) and a bottom `Failed Checks:` breakdown when any checks fail.
 
 Useful flags:
 

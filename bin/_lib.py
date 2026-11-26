@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 import shlex
 import stat
 import subprocess
@@ -251,7 +252,15 @@ def format_mode(mode: int) -> str:
     return f"{mode:04o}"
 
 
-def run_hook(hook_path: Path, env: dict[str, str], indent: str = "  ") -> int:
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+
+
+def run_hook(
+    hook_path: Path,
+    env: dict[str, str],
+    indent: str = "  ",
+    captured_lines: list[str] | None = None,
+) -> int:
     """Execute a system hook script and stream its output indented."""
     if not os.access(hook_path, os.X_OK):
         raise PermissionError(f"Hook is not executable: {hook_path}")
@@ -267,5 +276,48 @@ def run_hook(hook_path: Path, env: dict[str, str], indent: str = "  ") -> int:
     )
     assert proc.stdout is not None
     for line in proc.stdout:
-        print(f"{indent}{line.rstrip()}")
+        stripped = line.rstrip("\r\n")
+        if captured_lines is not None:
+            captured_lines.append(stripped)
+        print(f"{indent}{stripped}")
     return proc.wait()
+
+
+def extract_hook_failures(
+    hook_name: str, rc: int, output_lines: list[str]
+) -> list[str]:
+    """Extract concise failure descriptions from a failed hook's output."""
+    cleaned = [_ANSI_RE.sub("", line).strip() for line in output_lines]
+    fail_lines: list[str] = []
+    for line in cleaned:
+        if line.startswith("[FAIL]"):
+            detail = line[len("[FAIL]") :].strip()
+            fail_lines.append(
+                f"hooks/{hook_name}: {detail}"
+                if detail
+                else f"hooks/{hook_name} failed (exit {rc})"
+            )
+    if fail_lines:
+        return fail_lines
+
+    non_empty = [line for line in cleaned if line]
+    if non_empty:
+        error_lines = [line for line in non_empty if line.startswith("Error:")]
+        detail = error_lines[-1] if error_lines else non_empty[-1]
+        return [f"hooks/{hook_name} failed (exit {rc}): {detail}"]
+
+    return [f"hooks/{hook_name} failed (exit {rc})"]
+
+
+def print_failed_checks(
+    failures_by_system: list[tuple[str, list[str]]], style: Style
+) -> None:
+    """Print a bottom summary of failed systems and their failed checks."""
+    if not failures_by_system:
+        return
+    print()
+    print(style.bold("Failed Checks:"))
+    for system_name, checks in failures_by_system:
+        print(style.red(f"  - {system_name}:"))
+        for check in checks:
+            print(style.red(f"    - {check}"))
