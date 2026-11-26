@@ -5,6 +5,13 @@ Random things I want to be consolidated/fixed in my personal agent configuration
 ## Items
 
 - `safehouse/acp.json` has a hardcoded user-path. Use `envsubst` or similar to pre-fill `${HOME}`.
+- `safehouse` is not being installed/managed by this repo. It's expected to already exist.
+  - Verify this is true. I'm pretty sure it is.
+- I want to get rid of homebrew completely in exchange for Mise.
+  - The only hard requirement for my agent config is that Mise be installed. May create a simple `bootstrap.sh` that downloads/installs the latest version to get things going.
+- How can we remove the system `python` dependency from the `doctor`/`install` commands?
+    - Maybe pure bash?
+    - Maybe bootstrap Mise before anything else with Python as the only pre-installed tool?
 - `litellm-proxy` requires setting `.env` inside of it, and also seeds from `.env.example`.
   - Move `.env` out of `litellm-proxy` to `/litellm-proxy.env`. Require the file exist and contain all env vars.
   - Remove "seed" functionality all-together. It will result in a broken LiteLLM config anyway.
@@ -16,8 +23,6 @@ Random things I want to be consolidated/fixed in my personal agent configuration
 - Install and manage https://github.com/estelsmith/llm-task-dispatcher
   - Probably can go in `junie` since it's junie-specific.
   - Shallow clone of repo, run install/doctor commands internally?
-- How can we remove the system `python` dependency from the `doctor`/`install` commands?
-  - Maybe pure bash?
 - Move steel browser into this repo. See `~/repositories/firmprospects/engage/` for example setup.
 - Can we move away from custom `doctor`/`install` commands to Mise tasks, or a more generic config management system?
   - Ansible, etc.
