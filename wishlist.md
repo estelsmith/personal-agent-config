@@ -5,6 +5,9 @@ Random things I want to be consolidated/fixed in my personal agent configuration
 ## Items
 
 - `safehouse/acp.json` has a hardcoded user-path. Use `envsubst` or similar to pre-fill `${HOME}`.
+- System installations run in arbitrary order, when in reality the `mise` system needs to be the very first. Without Mise, most of this will fall apart.
+  - Implement a simple DAG that ensures that `doctor mise` comes back clean before anything the depends on it for doctor/install.
+  - Don't automatically `install mise` when trying to install dependents. Simply don't allow the dependency to continue to installation if this prerequisite fails.
 - `safehouse` is not being installed/managed by this repo. It's expected to already exist.
   - Verify this is true. I'm pretty sure it is.
 - I want to get rid of homebrew completely in exchange for Mise.
