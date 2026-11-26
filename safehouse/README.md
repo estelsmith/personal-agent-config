@@ -38,7 +38,7 @@ JetBrains IDE (~/.jetbrains/acp.json) or Terminal
   - Enables Docker access (`--enable=docker`) and forwards `LITELLM_MASTER_KEY` from the host environment (`--env-pass=LITELLM_MASTER_KEY`) so Junie can talk to [`litellm-proxy`](../litellm-proxy/README.md).
 - **Appended Seatbelt profile (`policies/*.sb` → `~/.config/safehouse/junie-local.sb`)**:
   - `safehouse/hooks/post-install` concatenates `safehouse/policies/*.sb` alphabetically and atomically writes `~/.config/safehouse/junie-local.sb` (`0644`):
-  - `policies/desktop-apps.sb`: Blocks direct execution of macOS `.app` bundles under `/Applications`, `/System/Volumes/Data/Applications`, `/System/Applications`, `/System/Cryptexes/App/System/Applications`, and `~/Applications` (with a carve-out for `Docker.app/Contents/Resources/{bin,cli-plugins}`), and denies `lsopen`, `/usr/bin/open`, and `/usr/bin/osascript`.
+  - `policies/desktop-apps.sb`: Blocks direct execution of macOS `.app` bundles under `/Applications`, `/System/Volumes/Data/Applications`, `/System/Applications`, `/System/Cryptexes/App/System/Applications`, and `~/Applications` (with carve-outs for `Docker.app/Contents/Resources/{bin,cli-plugins}` and `~/Applications/PhpStorm.app/Contents/{MacOS/phpstorm,jbr}` for the PhpStorm MCP server), and denies `lsopen`, `/usr/bin/open`, and `/usr/bin/osascript`.
   - `policies/docmancer.sb`: Allows read/write access to `~/.docmancer` (SQLite index, `sqlite-vec` database, extracted docs, and embeddings cache).
   - `policies/local-tools.sb`: Allows metadata and read access to `~/.homebrew`, `~/npm`, `~/bin`, and `~/.gitignore_global`.
 - **JetBrains ACP registration (`acp.json` → `~/.jetbrains/acp.json`)**:

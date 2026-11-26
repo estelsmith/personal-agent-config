@@ -17,6 +17,14 @@
     (subpath "/System/Volumes/Data/Applications/Docker.app/Contents/Resources/cli-plugins")
 )
 
+;; Keep the built-in PhpStorm MCP server working when launched via ACP
+;; (junie-safehouse grants read-only access to ~/Applications/PhpStorm.app,
+;; and Junie executes Contents/MacOS/phpstorm using the bundled JBR runtime).
+(allow process-exec
+    (home-literal "/Applications/PhpStorm.app/Contents/MacOS/phpstorm")
+    (home-subpath "/Applications/PhpStorm.app/Contents/jbr")
+)
+
 ;; Defense-in-depth against launching apps via Launch Services or AppleScript.
 (deny lsopen)
 (deny process-exec
