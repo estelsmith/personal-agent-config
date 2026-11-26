@@ -1,0 +1,2 @@
+# <mode> <source> <target> [sync|seed|sync-or-seed]
+# Static ~/.junie/ files can be added here; ~/.junie/AGENTS.md is built from rules/*.md by hooks/post-install.

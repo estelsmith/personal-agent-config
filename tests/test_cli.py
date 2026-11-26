@@ -186,7 +186,7 @@ sys.exit(0)
         self.assertEqual(res.returncode, 0, res.stderr)
         self.assertEqual(
             res.stdout.splitlines(),
-            ["docmancer", "litellm-proxy", "mise", "safehouse"],
+            ["docmancer", "junie", "litellm-proxy", "mise", "safehouse"],
         )
 
         bad = self._run(BIN_DOCTOR, ["does-not-exist"])
@@ -1271,6 +1271,131 @@ sys.exit(0)
         doc_no_env = self._run(BIN_DOCTOR, ["docmancer"])
         self.assertEqual(doc_no_env.returncode, 1)
         self.assertIn("Mise environment missing OPENAI_BASE_URL, OPENAI_API_KEY", doc_no_env.stdout)
+
+    def test_junie_install_and_doctor(self) -> None:
+        agents_path = self.home / ".junie" / "AGENTS.md"
+        rule_path = REPO_ROOT / "junie" / "rules" / "bash-command-intent.md"
+        expected_text = rule_path.read_text(encoding="utf-8")
+
+        # Pre-install doctor fails because ~/.junie/AGENTS.md is missing.
+        pre = self._run(BIN_DOCTOR, ["junie"])
+        self.assertEqual(pre.returncode, 1)
+        self.assertIn("missing: ~/.junie/AGENTS.md", pre.stdout)
+
+        # Dry run must not create ~/.junie/AGENTS.md.
+        dry = self._run(BIN_INSTALL, ["--dry-run", "junie"])
+        self.assertEqual(dry.returncode, 0, dry.stdout + dry.stderr)
+        self.assertFalse(agents_path.exists())
+        self.assertIn("hook=dry-run", dry.stdout)
+
+        # Install creates ~/.junie/AGENTS.md from junie/rules/*.md with mode 0644.
+        inst = self._run(BIN_INSTALL, ["junie"])
+        self.assertEqual(inst.returncode, 0, inst.stdout + inst.stderr)
+        self.assertIn("[INSTALLED] ~/.junie/AGENTS.md", inst.stdout)
+        self.assertTrue(agents_path.is_file())
+        self.assertFalse(agents_path.is_symlink())
+        self.assertEqual(stat.S_IMODE(agents_path.stat().st_mode), 0o644)
+        self.assertEqual(agents_path.read_text(encoding="utf-8"), expected_text)
+
+        # Doctor passes now.
+        doc_ok = self._run(BIN_DOCTOR, ["junie"])
+        self.assertEqual(doc_ok.returncode, 0, doc_ok.stdout + doc_ok.stderr)
+        self.assertIn("[OK] ~/.junie/AGENTS.md", doc_ok.stdout)
+
+        # Re-running install is idempotent.
+        reinst = self._run(BIN_INSTALL, ["junie"])
+        self.assertEqual(reinst.returncode, 0, reinst.stdout + reinst.stderr)
+        self.assertIn("[OK] ~/.junie/AGENTS.md (unchanged, 1 rule(s))", reinst.stdout)
+
+        # Content drift triggers doctor failure and install repair.
+        agents_path.write_text("# stale\n", encoding="utf-8")
+        doc_drift = self._run(BIN_DOCTOR, ["junie"])
+        self.assertEqual(doc_drift.returncode, 1)
+        self.assertIn("sha256 mismatch: ~/.junie/AGENTS.md", doc_drift.stdout)
+
+        fix_content = self._run(BIN_INSTALL, ["junie"])
+        self.assertEqual(fix_content.returncode, 0, fix_content.stdout + fix_content.stderr)
+        self.assertIn("[UPDATED] ~/.junie/AGENTS.md", fix_content.stdout)
+        self.assertEqual(agents_path.read_text(encoding="utf-8"), expected_text)
+
+        # Mode drift triggers doctor failure and install repair.
+        agents_path.chmod(0o600)
+        doc_mode = self._run(BIN_DOCTOR, ["junie"])
+        self.assertEqual(doc_mode.returncode, 1)
+        self.assertIn("mode mismatch: ~/.junie/AGENTS.md", doc_mode.stdout)
+
+        fix_mode = self._run(BIN_INSTALL, ["junie"])
+        self.assertEqual(fix_mode.returncode, 0, fix_mode.stdout + fix_mode.stderr)
+        self.assertIn("mode 0600 -> 0644", fix_mode.stdout)
+        self.assertEqual(stat.S_IMODE(agents_path.stat().st_mode), 0o644)
+
+        # Symlink target is rejected by doctor and replaced with regular file by install.
+        agents_path.unlink()
+        agents_path.symlink_to(rule_path)
+        doc_sym = self._run(BIN_DOCTOR, ["junie"])
+        self.assertEqual(doc_sym.returncode, 1)
+        self.assertIn("symlink (expected regular file): ~/.junie/AGENTS.md", doc_sym.stdout)
+
+        fix_sym = self._run(BIN_INSTALL, ["junie"])
+        self.assertEqual(fix_sym.returncode, 0, fix_sym.stdout + fix_sym.stderr)
+        self.assertIn("symlink replaced", fix_sym.stdout)
+        self.assertFalse(agents_path.is_symlink())
+        self.assertEqual(agents_path.read_text(encoding="utf-8"), expected_text)
+
+    def test_junie_multiple_rules_concatenation(self) -> None:
+        repo = self.tmp / "junie_repo"
+        shutil.copytree(
+            REPO_ROOT / "bin",
+            repo / "bin",
+            ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+        )
+        shutil.copytree(
+            REPO_ROOT / "junie",
+            repo / "junie",
+            ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+        )
+        bin_doctor = repo / "bin" / "doctor"
+        bin_install = repo / "bin" / "install"
+        rules_dir = repo / "junie" / "rules"
+
+        (rules_dir / "00-first.md").write_text("# First Rule\n\nAlpha.\n\n", encoding="utf-8")
+        (rules_dir / "zz-last.md").write_text("# Last Rule\n\nOmega.", encoding="utf-8")
+        (rules_dir / "ignored.txt").write_text("should not be included\n", encoding="utf-8")
+
+        inst = self._run(bin_install, ["junie"])
+        self.assertEqual(inst.returncode, 0, inst.stdout + inst.stderr)
+        self.assertIn("from 3 rule(s)", inst.stdout)
+
+        agents_path = self.home / ".junie" / "AGENTS.md"
+        content = agents_path.read_text(encoding="utf-8")
+        base_rule = (rules_dir / "bash-command-intent.md").read_text(encoding="utf-8").strip("\n")
+        expected = f"# First Rule\n\nAlpha.\n\n{base_rule}\n\n# Last Rule\n\nOmega.\n"
+        self.assertEqual(content, expected)
+        self.assertNotIn("should not be included", content)
+
+        doc_ok = self._run(bin_doctor, ["junie"])
+        self.assertEqual(doc_ok.returncode, 0, doc_ok.stdout + doc_ok.stderr)
+        self.assertIn("3 rule(s)", doc_ok.stdout)
+
+        # Updating a rule file causes doctor to fail until install re-syncs.
+        (rules_dir / "zz-last.md").write_text("# Last Rule\n\nUpdated.\n", encoding="utf-8")
+        doc_stale = self._run(bin_doctor, ["junie"])
+        self.assertEqual(doc_stale.returncode, 1)
+        self.assertIn("sha256 mismatch: ~/.junie/AGENTS.md", doc_stale.stdout)
+
+        reinst = self._run(bin_install, ["junie"])
+        self.assertEqual(reinst.returncode, 0, reinst.stdout + reinst.stderr)
+        self.assertIn("Updated.\n", agents_path.read_text(encoding="utf-8"))
+
+        # Empty rules directory fails cleanly.
+        for md in rules_dir.glob("*.md"):
+            md.unlink()
+        doc_empty = self._run(bin_doctor, ["junie"])
+        self.assertEqual(doc_empty.returncode, 1)
+        self.assertIn("no *.md rule files found", doc_empty.stdout)
+        inst_empty = self._run(bin_install, ["junie"])
+        self.assertEqual(inst_empty.returncode, 1)
+        self.assertIn("no *.md rule files found", inst_empty.stdout)
 
 
 if __name__ == "__main__":
