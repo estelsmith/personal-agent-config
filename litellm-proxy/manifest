@@ -1,0 +1,7 @@
+# <mode> <source> <target> [sync|seed]
+0644 docker-compose.yml         ~/litellm-proxy/docker-compose.yml
+0644 config.yaml                ~/litellm-proxy/config.yaml
+0644 custom_callbacks.py        ~/litellm-proxy/custom_callbacks.py
+0644 gemini_decision_adapter.py ~/litellm-proxy/gemini_decision_adapter.py
+0644 Dockerfile.adapter         ~/litellm-proxy/Dockerfile.adapter
+0600 .env.example               ~/litellm-proxy/.env                seed

@@ -1,0 +1,392 @@
+#!/usr/bin/env python3
+"""Install missing or mismatched config files and run system lifecycle hooks."""
+
+from __future__ import annotations
+
+import argparse
+import os
+import shutil
+import sys
+import tempfile
+from dataclasses import dataclass
+from pathlib import Path
+
+from _lib import (
+    Style,
+    discover_systems,
+    file_mode,
+    find_repo_root,
+    format_mode,
+    parse_manifest,
+    run_hook,
+    select_systems,
+    sha256_file,
+)
+
+
+@dataclass
+class SystemReport:
+    name: str
+    installed: int = 0
+    updated: int = 0
+    seeded: int = 0
+    unchanged: int = 0
+    failed: int = 0
+    hook_status: str = "none"
+
+
+def _atomic_install(src: Path, dst: Path, mode: int) -> None:
+    """Copy src to dst atomically with exact permissions."""
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(prefix=f".{dst.name}.", dir=str(dst.parent))
+    tmp_path = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "wb") as out_fh, src.open("rb") as in_fh:
+            shutil.copyfileobj(in_fh, out_fh)
+        os.chmod(tmp_path, mode)
+        os.replace(tmp_path, dst)
+    except Exception:
+        if tmp_path.exists():
+            tmp_path.unlink(missing_ok=True)
+        raise
+
+
+def install_system(
+    repo_root: Path,
+    system,
+    style: Style,
+    *,
+    dry_run: bool,
+    no_hooks: bool,
+    force: bool,
+) -> SystemReport:
+    """Install/update files and execute lifecycle hooks for a single system."""
+    report = SystemReport(name=system.name)
+    print(style.bold(f"==> {system.name}"))
+
+    pre_hook = system.hook("pre-install")
+    if pre_hook is not None:
+        if no_hooks:
+            print(f"  {style.dim('[SKIP]')} pre-install hook skipped (--no-hooks)")
+        elif dry_run:
+            print(
+                f"  {style.cyan('[DRY-RUN]')} would run {system.name}/hooks/pre-install"
+            )
+        else:
+            env = os.environ.copy()
+            env.update(
+                {
+                    "REPO_ROOT": str(repo_root),
+                    "SYSTEM_NAME": system.name,
+                    "SYSTEM_DIR": str(system.path),
+                }
+            )
+            print(f"  {style.cyan('[HOOK]')} running {system.name}/hooks/pre-install")
+            try:
+                rc = run_hook(pre_hook, env, indent="    ")
+            except PermissionError as exc:
+                print(f"  {style.red('[FAIL]')} {exc}")
+                report.failed += 1
+                report.hook_status = "pre-install failed"
+                return report
+            if rc != 0:
+                print(
+                    f"  {style.red('[FAIL]')} {system.name}/hooks/pre-install failed (exit {rc})"
+                )
+                report.failed += 1
+                report.hook_status = f"pre-install failed (exit {rc})"
+                return report
+
+    if system.manifest_path is not None:
+        try:
+            entries = parse_manifest(system)
+        except ValueError as exc:
+            print(f"  {style.red('[FAIL]')} invalid manifest: {exc}")
+            report.failed += 1
+            return report
+
+        for entry in entries:
+            if not entry.source.is_file():
+                print(
+                    f"  {style.red('[FAIL]')} missing repo source: {entry.rel_source}"
+                )
+                report.failed += 1
+                continue
+
+            if entry.target.is_dir() and not entry.target.is_symlink():
+                print(
+                    f"  {style.red('[FAIL]')} target is a directory: {entry.raw_target}"
+                )
+                report.failed += 1
+                continue
+
+            exists = entry.target.exists() or entry.target.is_symlink()
+
+            if entry.kind == "seed":
+                if exists:
+                    print(
+                        f"  {style.green('[OK]')} {entry.raw_target} (seed exists, preserved)"
+                    )
+                    report.unchanged += 1
+                elif dry_run:
+                    print(
+                        f"  {style.cyan('[DRY-RUN]')} would seed {entry.raw_target} "
+                        f"from {entry.rel_source} (mode {format_mode(entry.mode)})"
+                    )
+                    report.seeded += 1
+                else:
+                    try:
+                        _atomic_install(entry.source, entry.target, entry.mode)
+                    except OSError as exc:
+                        print(
+                            f"  {style.red('[FAIL]')} could not seed {entry.raw_target}: {exc}"
+                        )
+                        report.failed += 1
+                    else:
+                        print(
+                            f"  {style.yellow('[SEEDED]')} {entry.raw_target} "
+                            f"from {entry.rel_source} (mode {format_mode(entry.mode)}) — populate local secrets/config"
+                        )
+                        report.seeded += 1
+                continue
+
+            # kind == "sync"
+            if not exists:
+                if dry_run:
+                    print(
+                        f"  {style.cyan('[DRY-RUN]')} would install {entry.raw_target} "
+                        f"(mode {format_mode(entry.mode)})"
+                    )
+                    report.installed += 1
+                else:
+                    try:
+                        _atomic_install(entry.source, entry.target, entry.mode)
+                    except OSError as exc:
+                        print(
+                            f"  {style.red('[FAIL]')} could not install {entry.raw_target}: {exc}"
+                        )
+                        report.failed += 1
+                    else:
+                        print(
+                            f"  {style.green('[INSTALLED]')} {entry.raw_target} "
+                            f"(mode {format_mode(entry.mode)})"
+                        )
+                        report.installed += 1
+                continue
+
+            # Target exists (or is a symlink)
+            broken_symlink = entry.target.is_symlink() and not entry.target.exists()
+            try:
+                src_hash = sha256_file(entry.source)
+                dst_hash = "" if broken_symlink else sha256_file(entry.target)
+                actual_mode = None if broken_symlink else file_mode(entry.target)
+            except OSError as exc:
+                print(
+                    f"  {style.red('[FAIL]')} cannot inspect {entry.raw_target}: {exc}"
+                )
+                report.failed += 1
+                continue
+
+            needs_content = force or entry.target.is_symlink() or (src_hash != dst_hash)
+            needs_mode = actual_mode != entry.mode
+
+            if needs_content:
+                if force and src_hash == dst_hash and not entry.target.is_symlink():
+                    reason = "forced"
+                elif broken_symlink:
+                    reason = "broken symlink replaced"
+                elif entry.target.is_symlink():
+                    reason = "symlink replaced"
+                else:
+                    reason = f"sha256 {dst_hash[:12]} -> {src_hash[:12]}"
+
+                if dry_run:
+                    print(
+                        f"  {style.cyan('[DRY-RUN]')} would update {entry.raw_target} ({reason})"
+                    )
+                    report.updated += 1
+                else:
+                    try:
+                        _atomic_install(entry.source, entry.target, entry.mode)
+                    except OSError as exc:
+                        print(
+                            f"  {style.red('[FAIL]')} could not update {entry.raw_target}: {exc}"
+                        )
+                        report.failed += 1
+                    else:
+                        print(
+                            f"  {style.yellow('[UPDATED]')} {entry.raw_target} ({reason})"
+                        )
+                        report.updated += 1
+            elif needs_mode:
+                assert actual_mode is not None
+                reason = f"mode {format_mode(actual_mode)} -> {format_mode(entry.mode)}"
+                if dry_run:
+                    print(
+                        f"  {style.cyan('[DRY-RUN]')} would update {entry.raw_target} ({reason})"
+                    )
+                    report.updated += 1
+                else:
+                    try:
+                        os.chmod(entry.target, entry.mode)
+                    except OSError as exc:
+                        print(
+                            f"  {style.red('[FAIL]')} could not chmod {entry.raw_target}: {exc}"
+                        )
+                        report.failed += 1
+                    else:
+                        print(
+                            f"  {style.yellow('[UPDATED]')} {entry.raw_target} ({reason})"
+                        )
+                        report.updated += 1
+            else:
+                print(
+                    f"  {style.green('[OK]')} {entry.raw_target} (unchanged)"
+                )
+                report.unchanged += 1
+
+    post_hook = system.hook("post-install")
+    if post_hook is not None:
+        if no_hooks:
+            print(f"  {style.dim('[SKIP]')} post-install hook skipped (--no-hooks)")
+            report.hook_status = "skipped (--no-hooks)"
+        elif dry_run:
+            print(
+                f"  {style.cyan('[DRY-RUN]')} would run {system.name}/hooks/post-install"
+            )
+            report.hook_status = "dry-run"
+        elif report.failed > 0:
+            print(
+                f"  {style.yellow('[SKIP]')} skipping {system.name}/hooks/post-install due to file errors"
+            )
+            report.hook_status = "skipped (file errors)"
+        else:
+            changed_count = report.installed + report.updated + report.seeded
+            env = os.environ.copy()
+            env.update(
+                {
+                    "REPO_ROOT": str(repo_root),
+                    "SYSTEM_NAME": system.name,
+                    "SYSTEM_DIR": str(system.path),
+                    "FILES_INSTALLED": str(report.installed),
+                    "FILES_UPDATED": str(report.updated),
+                    "FILES_SEEDED": str(report.seeded),
+                    "FILES_UNCHANGED": str(report.unchanged),
+                    "FILES_CHANGED": "1" if changed_count > 0 else "0",
+                }
+            )
+            print(f"  {style.cyan('[HOOK]')} running {system.name}/hooks/post-install")
+            try:
+                rc = run_hook(post_hook, env, indent="    ")
+            except PermissionError as exc:
+                print(f"  {style.red('[FAIL]')} {exc}")
+                report.failed += 1
+                report.hook_status = "failed (not executable)"
+            else:
+                if rc == 0:
+                    print(
+                        f"  {style.green('[OK]')} {system.name}/hooks/post-install completed"
+                    )
+                    report.hook_status = "ok"
+                else:
+                    print(
+                        f"  {style.red('[FAIL]')} {system.name}/hooks/post-install failed (exit {rc})"
+                    )
+                    report.failed += 1
+                    report.hook_status = f"failed (exit {rc})"
+
+    return report
+
+
+def parse_args(argv: list[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        prog="install",
+        description="Install missing or mismatched files and run system post-install hooks.",
+    )
+    parser.add_argument(
+        "systems",
+        nargs="*",
+        help="Optional system name(s) to install (defaults to all discovered systems).",
+    )
+    parser.add_argument(
+        "-n",
+        "--dry-run",
+        action="store_true",
+        help="Show planned changes without modifying files or running hooks.",
+    )
+    parser.add_argument(
+        "--no-hooks",
+        action="store_true",
+        help="Install/sync files only without running pre-install or post-install hooks.",
+    )
+    parser.add_argument(
+        "-f",
+        "--force",
+        action="store_true",
+        help="Reinstall synced files even when SHA-256 and permissions already match.",
+    )
+    parser.add_argument(
+        "--list",
+        action="store_true",
+        help="List discovered systems and exit.",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(sys.argv[1:] if argv is None else argv)
+    repo_root = find_repo_root()
+    style = Style()
+
+    if args.list:
+        for sys_obj in discover_systems(repo_root):
+            print(sys_obj.name)
+        return 0
+
+    try:
+        systems = select_systems(repo_root, args.systems)
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 2
+
+    if not systems:
+        print("No systems discovered.")
+        return 0
+
+    reports: list[SystemReport] = []
+    for idx, system in enumerate(systems):
+        if idx > 0:
+            print()
+        reports.append(
+            install_system(
+                repo_root,
+                system,
+                style,
+                dry_run=args.dry_run,
+                no_hooks=args.no_hooks,
+                force=args.force,
+            )
+        )
+
+    print()
+    print(style.bold("Install Status:"))
+    total_failed = 0
+    for r in reports:
+        total_failed += r.failed
+        line = (
+            f"  - {r.name}: installed={r.installed}, updated={r.updated}, "
+            f"seeded={r.seeded}, unchanged={r.unchanged}, failed={r.failed}, "
+            f"hook={r.hook_status}"
+        )
+        if r.failed > 0:
+            print(style.red(line))
+        elif r.installed + r.updated + r.seeded > 0:
+            print(style.yellow(line) if args.dry_run else style.green(line))
+        else:
+            print(style.green(line))
+
+    return 1 if total_failed > 0 else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

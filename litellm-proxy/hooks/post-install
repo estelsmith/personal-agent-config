@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+target_dir="${HOME}/litellm-proxy"
+compose_file="${target_dir}/docker-compose.yml"
+
+python3 "${script_dir}/_bash_profile.py" sync
+
+if ! command -v docker >/dev/null 2>&1; then
+    echo "Error: docker CLI is not installed or not on PATH" >&2
+    exit 1
+fi
+
+if ! docker info >/dev/null 2>&1; then
+    echo "Error: Docker daemon is not running or not reachable" >&2
+    exit 1
+fi
+
+if [ ! -f "$compose_file" ]; then
+    echo "Error: missing ${compose_file}" >&2
+    exit 1
+fi
+
+compose() {
+    docker compose --project-directory "$target_dir" -f "$compose_file" "$@"
+}
+
+echo "Pulling upstream images..."
+compose pull --ignore-buildable
+
+echo "Building local images..."
+compose build
+
+echo "Stopping existing stack..."
+compose down
+
+echo "Starting stack and waiting for healthchecks..."
+compose up -d --wait
+
+echo "Stack status:"
+compose ps

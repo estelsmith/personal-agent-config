@@ -1,0 +1,209 @@
+#!/usr/bin/env python3
+"""Check configuration sync and system health across discovered agent systems."""
+
+from __future__ import annotations
+
+import argparse
+import os
+import sys
+from pathlib import Path
+
+from _lib import (
+    Style,
+    discover_systems,
+    file_mode,
+    find_repo_root,
+    format_mode,
+    parse_manifest,
+    run_hook,
+    select_systems,
+    sha256_file,
+)
+
+
+def check_system(repo_root: Path, system, style: Style) -> tuple[int, int, int]:
+    """Run file and hook checks for one system. Returns (passed, warned, failed)."""
+    passed = 0
+    warned = 0
+    failed = 0
+
+    print(style.bold(f"==> {system.name}"))
+
+    if system.manifest_path is not None:
+        try:
+            entries = parse_manifest(system)
+        except ValueError as exc:
+            print(f"  {style.red('[FAIL]')} invalid manifest: {exc}")
+            return 0, 0, 1
+
+        for entry in entries:
+            if not entry.source.is_file():
+                print(
+                    f"  {style.red('[FAIL]')} missing repo source: {entry.rel_source}"
+                )
+                failed += 1
+                continue
+
+            if not entry.target.exists() and not entry.target.is_symlink():
+                kind_note = f" (seed from {entry.rel_source})" if entry.kind == "seed" else ""
+                print(
+                    f"  {style.red('[FAIL]')} missing: {entry.raw_target} ({entry.target}){kind_note}"
+                )
+                failed += 1
+                continue
+
+            if entry.target.is_dir():
+                print(
+                    f"  {style.red('[FAIL]')} expected file, found directory: {entry.raw_target}"
+                )
+                failed += 1
+                continue
+
+            if entry.target.is_symlink() and not entry.target.exists():
+                print(
+                    f"  {style.red('[FAIL]')} broken symlink: {entry.raw_target} -> {os.readlink(entry.target)}"
+                )
+                failed += 1
+                continue
+
+            try:
+                actual_mode = file_mode(entry.target)
+                if entry.kind == "seed":
+                    if (actual_mode & ~entry.mode) != 0:
+                        print(
+                            f"  {style.yellow('[WARN]')} {entry.raw_target} "
+                            f"(seed present; mode {format_mode(actual_mode)} is looser than {format_mode(entry.mode)})"
+                        )
+                        warned += 1
+                    else:
+                        print(
+                            f"  {style.green('[OK]')} {entry.raw_target} "
+                            f"(seed present, mode {format_mode(actual_mode)})"
+                        )
+                        passed += 1
+                    continue
+
+                src_hash = sha256_file(entry.source)
+                dst_hash = sha256_file(entry.target)
+            except OSError as exc:
+                print(
+                    f"  {style.red('[FAIL]')} cannot inspect {entry.raw_target}: {exc}"
+                )
+                failed += 1
+                continue
+
+            if src_hash != dst_hash:
+                print(
+                    f"  {style.red('[FAIL]')} sha256 mismatch: {entry.raw_target} "
+                    f"(repo {src_hash[:12]} != local {dst_hash[:12]})"
+                )
+                failed += 1
+            elif actual_mode != entry.mode:
+                print(
+                    f"  {style.red('[FAIL]')} mode mismatch: {entry.raw_target} "
+                    f"(expected {format_mode(entry.mode)}, got {format_mode(actual_mode)})"
+                )
+                failed += 1
+            else:
+                print(
+                    f"  {style.green('[OK]')} {entry.raw_target} "
+                    f"(sha256 {src_hash[:12]}, mode {format_mode(actual_mode)})"
+                )
+                passed += 1
+
+    doctor_hook = system.hook("doctor")
+    if doctor_hook is not None:
+        env = os.environ.copy()
+        env.update(
+            {
+                "REPO_ROOT": str(repo_root),
+                "SYSTEM_NAME": system.name,
+                "SYSTEM_DIR": str(system.path),
+            }
+        )
+        print(f"  {style.cyan('[HOOK]')} running {system.name}/hooks/doctor")
+        try:
+            rc = run_hook(doctor_hook, env, indent="    ")
+        except PermissionError as exc:
+            print(f"  {style.red('[FAIL]')} {exc}")
+            failed += 1
+        else:
+            if rc == 0:
+                print(f"  {style.green('[OK]')} {system.name}/hooks/doctor passed")
+                passed += 1
+            else:
+                print(
+                    f"  {style.red('[FAIL]')} {system.name}/hooks/doctor failed (exit {rc})"
+                )
+                failed += 1
+
+    return passed, warned, failed
+
+
+def parse_args(argv: list[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        prog="doctor",
+        description="Verify installed files (existence, SHA-256, mode) and run system health hooks.",
+    )
+    parser.add_argument(
+        "systems",
+        nargs="*",
+        help="Optional system name(s) to check (defaults to all discovered systems).",
+    )
+    parser.add_argument(
+        "--list",
+        action="store_true",
+        help="List discovered systems and exit.",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(sys.argv[1:] if argv is None else argv)
+    repo_root = find_repo_root()
+    style = Style()
+
+    if args.list:
+        for sys_obj in discover_systems(repo_root):
+            print(sys_obj.name)
+        return 0
+
+    try:
+        systems = select_systems(repo_root, args.systems)
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 2
+
+    if not systems:
+        print("No systems discovered.")
+        return 0
+
+    total_passed = 0
+    total_warned = 0
+    total_failed = 0
+
+    for idx, system in enumerate(systems):
+        if idx > 0:
+            print()
+        p, w, f = check_system(repo_root, system, style)
+        total_passed += p
+        total_warned += w
+        total_failed += f
+
+    print()
+    summary = (
+        f"Summary: {total_passed} passed, {total_warned} warning(s), "
+        f"{total_failed} failed across {len(systems)} system(s)."
+    )
+    if total_failed > 0:
+        print(style.red(summary))
+        return 1
+    if total_warned > 0:
+        print(style.yellow(summary))
+        return 0
+    print(style.green(summary))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

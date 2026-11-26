@@ -1,0 +1,78 @@
+#!/usr/bin/env python3
+"""Health check hook for safehouse wrapper, binaries, and ACP config."""
+
+from __future__ import annotations
+
+import json
+import os
+import sys
+from pathlib import Path
+
+
+def check_executable(path: Path, label: str) -> bool:
+    if not path.exists():
+        print(f"[FAIL] missing {label}: {path}")
+        return False
+    if not os.access(path, os.X_OK):
+        print(f"[FAIL] {label} is not executable: {path}")
+        return False
+    print(f"[OK] {label} executable: {path}")
+    return True
+
+
+def main() -> int:
+    home = Path.home()
+    ok = True
+
+    wrapper = home / "bin" / "junie-safehouse"
+    safehouse_bin = home / ".homebrew" / "bin" / "safehouse"
+    junie_bin = home / ".local" / "bin" / "junie"
+    acp_json = home / ".jetbrains" / "acp.json"
+
+    if not check_executable(wrapper, "wrapper script"):
+        ok = False
+    if not check_executable(safehouse_bin, "safehouse binary"):
+        ok = False
+    if not check_executable(junie_bin, "junie binary"):
+        ok = False
+
+    if not acp_json.is_file():
+        print(f"[FAIL] missing ACP config: {acp_json}")
+        ok = False
+    else:
+        try:
+            data = json.loads(acp_json.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            print(f"[FAIL] invalid JSON in {acp_json}: {exc}")
+            ok = False
+        else:
+            cmd = (
+                data.get("agent_servers", {})
+                .get("junie-safehouse", {})
+                .get("command")
+            )
+            if not cmd:
+                print(
+                    f"[FAIL] {acp_json} missing agent_servers.junie-safehouse.command"
+                )
+                ok = False
+            else:
+                cmd_path = Path(cmd)
+                if not check_executable(cmd_path, "ACP server command"):
+                    ok = False
+                elif cmd_path != wrapper:
+                    print(
+                        f"[WARN] {acp_json} command ({cmd_path}) differs from {wrapper}"
+                    )
+
+    if not os.environ.get("LITELLM_MASTER_KEY"):
+        print(
+            "[WARN] LITELLM_MASTER_KEY is not set in current environment "
+            "(junie-safehouse passes it via --env-pass=LITELLM_MASTER_KEY)"
+        )
+
+    return 0 if ok else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
