@@ -59,7 +59,7 @@ Upstream LiteLLM does not natively speak Google's `v1beta/decisions` endpoint fo
 
 Loaded via `litellm_settings.callbacks: custom_callbacks.proxy_handler_instance`, this module handles three Junie-specific behaviors:
 
-1. **Google GenAI decision routing**: Monkey-patches `GoogleGenAIGenerateContentHandler.get_structured_messages` so `complexity_router` can inspect Google GenAI `:generateContent` payloads instead of skipping routing.
+1. **Google GenAI decision routing**: Monkey-patches `GoogleGenAIGenerateContentHandler.get_structured_messages` so `complexity_router` can inspect Google GenAI `:generateContent` payloads instead of skipping routing. Junie's custom Gemini models must stay on `apiType: "Google"` (`:generateContent`) because LiteLLM's `OpenAICompletion` surface appends `__thought__<base64_signature>` to `tool_call.id` by default, breaking `spawn_subagent` in `/task-dispatcher`.
 2. **Side-request pinning**: Intercepts Junie's lightweight title-creator and task-description-summarizer system prompts in `async_pre_call_hook` and routes them straight to `claude-haiku-5-5-low`.
 3. **Capability-filter stabilization**: Cleans trailing commentary from Junie capability-filter responses (both streaming and non-streaming) and guarantees any skill/agent explicitly named in the user prompt is included in the returned ID list.
 

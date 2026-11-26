@@ -30,6 +30,15 @@ from litellm.llms.gemini.google_genai.guardrail_translation.handler import (
 # ---------------------------------------------------------------------------
 # Google GenAI -> complexity_router compatibility patch
 #
+# Junie's custom Gemini models must use ``apiType: "Google"`` (:generateContent
+# or :streamGenerateContent) rather than ``OpenAICompletion``. On LiteLLM's
+# OpenAI chat surface, ``embeds_thought_signature_in_tool_call_id`` defaults to
+# True and appends a long ``__thought__<base64_signature>`` suffix onto
+# ``tool_call.id``, which breaks Junie's ``spawn_subagent`` tool calls in
+# ``/task-dispatcher`` (while disabling it moves signatures to non-standard
+# fields that fail if stripped on echo). Using ``apiType: "Google"`` keeps
+# Gemini's ``thoughtSignature`` natively inside ``content.parts[]``.
+#
 # When a client uses the Google GenAI surface (:generateContent or
 # :streamGenerateContent), requests carry ``contents`` and ``systemInstruction``
 # instead of OpenAI ``messages``. LiteLLM's ComplexityRouter calls

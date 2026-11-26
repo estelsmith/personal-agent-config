@@ -12,6 +12,13 @@ Because `hooks/post-install` renders `~/.junie/AGENTS.md` deterministically in s
 
 `~/.junie/AGENTS.md` sets my always-on behavioral baseline across projects, complementing on-demand skills like [`docmancer`](../docmancer/README.md)'s `~/.junie/skills/docmancer/SKILL.md`. Inside [`safehouse`](../safehouse/README.md), `junie-safehouse` mounts `~/.junie` read/write so Junie can read `AGENTS.md`, skills, and session state normally.
 
+### Custom Models (`~/.junie/models/`)
+
+Custom Gemini model profiles in `~/.junie/models/` (such as `gemini-ladder.json` and `litellm-gemini-4-hydrogen-*.json`, currently managed outside `junie/manifest`) **must use `apiType: "Google"`** (`:generateContent`) rather than `apiType: "OpenAICompletion"`.
+
+- Via LiteLLM's OpenAI chat endpoint (`OpenAICompletion`), `embeds_thought_signature_in_tool_call_id` defaults to `True`, appending a long `__thought__<base64_signature>` suffix onto `tool_call.id`. That breaks Junie's `spawn_subagent` tool calls (used by `/task-dispatcher`), and moving signatures to non-standard fields fails when tool-result echoes strip them.
+- Using `apiType: "Google"` (`:generateContent`) keeps Gemini's `thoughtSignature` natively inside `content.parts[]`, so subagent spawning works reliably. [`litellm-proxy/custom_callbacks.py`](../litellm-proxy/custom_callbacks.py) patches `GoogleGenAIGenerateContentHandler.get_structured_messages` specifically so `complexity_router` (`gemini-ladder`) works with `:generateContent` payloads.
+
 ## How It Works
 
 `junie/manifest` currently holds comments only. Static `~/.junie/` files can be added there later, while `~/.junie/AGENTS.md` is generated dynamically by hooks:
