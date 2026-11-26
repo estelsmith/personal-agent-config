@@ -4,6 +4,9 @@ Random things I want to be consolidated/fixed in my personal agent configuration
 
 ## Items
 
+- Stable LiteLLM session IDs for each Junie ACP session?
+  - Currently each turn gets a new session, and it's annoying to see which chats belong to which session.
+  - Requires using Junie to inspect logs to correlate what's what. Not very human-friendly.
 - How can we remove the system `python` dependency from the `doctor`/`install` commands?
     - Maybe pure bash?
     - Maybe bootstrap Mise before anything else with Python as the only pre-installed tool?
