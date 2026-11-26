@@ -138,22 +138,10 @@
   </g>
 
   <!-- Right Side Content -->
-  <g transform="translate(345, 72)">
-    <!-- Eyebrow tag -->
-    <rect x="0" y="0" width="246" height="28" rx="14" fill="#162238" stroke="#2D3F5E" stroke-width="1"/>
-    <circle cx="16" cy="14" r="4" fill="#34D399"/>
-    <text
-      x="28" y="18"
-      fill="#94A3B8"
-      font-family="SF Mono, ui-monospace, Menlo, Monaco, Consolas, monospace"
-      font-size="11.5"
-      font-weight="600"
-      letter-spacing="1.2"
-    >DECLARATIVE AGENT CONFIG</text>
-
+  <g transform="translate(345, 84)">
     <!-- Main Title -->
     <text
-      x="0" y="84"
+      x="0" y="44"
       fill="url(#title-grad)"
       font-family="-apple-system, BlinkMacSystemFont, SF Pro Display, Segoe UI, Helvetica, Arial, sans-serif"
       font-size="48"
@@ -163,18 +151,18 @@
 
     <!-- Subtitle -->
     <text
-      x="0" y="120"
+      x="0" y="80"
       fill="#94A3B8"
       font-family="-apple-system, BlinkMacSystemFont, SF Pro Text, Segoe UI, Helvetica, Arial, sans-serif"
       font-size="17.5"
       font-weight="400"
-    >Idempotent manifests, lifecycle hooks, local LLM routing &amp; sandboxing for JetBrains Junie</text>
+    >AI coding agent setup for macOS, JetBrains IDEs, and Junie</text>
 
     <!-- Divider accent -->
-    <rect x="0" y="144" width="76" height="3" rx="1.5" fill="url(#shield-grad)"/>
+    <rect x="0" y="104" width="76" height="3" rx="1.5" fill="url(#shield-grad)"/>
 
     <!-- 5 System Pills -->
-    <g transform="translate(0, 168)" font-family="SF Mono, ui-monospace, Menlo, Monaco, Consolas, monospace" font-size="13" font-weight="500">
+    <g transform="translate(0, 128)" font-family="SF Mono, ui-monospace, Menlo, Monaco, Consolas, monospace" font-size="13" font-weight="500">
       <!-- mise -->
       <g transform="translate(0, 0)">
         <rect x="0" y="0" width="76" height="32" rx="8" fill="#131D31" stroke="#26354F" stroke-width="1"/>
