@@ -4,6 +4,9 @@ Random things I want to be consolidated into my personal agent configuration.
 
 ## Items
 
+- `litellm-proxy` requires setting `.env` inside of it, and also seeds from `.env.example`.
+  - Move `.env` out of `litellm-proxy` to `/litellm-proxy.env`. Require the file exist and contain all env vars.
+  - Remove "seed" functionality all-together. It will result in a broken LiteLLM config anyway.
 - Ollama. Can be managed by Mise, and `doctor`/`install` can ensure the `embeddinggemma-2:740m` is installed for docmancer's use.
   - Currently installed/configured globally, completely disconnected from the agent config repo.
 - `junie` or `litellm-proxy` should manage Junie custom models for LiteLLM in `~/.junie/models`
