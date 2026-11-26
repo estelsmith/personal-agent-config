@@ -20,3 +20,4 @@ Random things I want to be consolidated/fixed in my personal agent configuration
 - Move steel browser into this repo. See `~/repositories/firmprospects/engage/` for example setup.
 - Can we move away from custom `doctor`/`install` commands to Mise tasks, or a more generic config management system?
   - Ansible, etc.
+- Would an `AGENTS.md` file help manage this repo?
