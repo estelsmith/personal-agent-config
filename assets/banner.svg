@@ -1,0 +1,214 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 340" width="1200" height="340" role="img" aria-labelledby="title desc">
+  <title id="title">Personal Agent Config</title>
+  <desc>Banner logo for Personal Agent Config: a declarative, idempotent configuration repository for managing a local AI coding agent environment on macOS.</desc>
+
+  <defs>
+    <!-- Card background gradient -->
+    <linearGradient id="bg-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0B1020"/>
+      <stop offset="55%" stop-color="#111827"/>
+      <stop offset="100%" stop-color="#0F172A"/>
+    </linearGradient>
+
+    <!-- Ambient glow accents -->
+    <radialGradient id="glow-left" cx="22%" cy="50%" r="45%">
+      <stop offset="0%" stop-color="#38BDF8" stop-opacity="0.22"/>
+      <stop offset="55%" stop-color="#6366F1" stop-opacity="0.08"/>
+      <stop offset="100%" stop-color="#0B1020" stop-opacity="0"/>
+    </radialGradient>
+
+    <radialGradient id="glow-right" cx="85%" cy="25%" r="40%">
+      <stop offset="0%" stop-color="#22D3EE" stop-opacity="0.14"/>
+      <stop offset="100%" stop-color="#0B1020" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Emblem gradient -->
+    <linearGradient id="shield-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38BDF8"/>
+      <stop offset="50%" stop-color="#6366F1"/>
+      <stop offset="100%" stop-color="#34D399"/>
+    </linearGradient>
+
+    <linearGradient id="shield-fill" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#162238"/>
+      <stop offset="100%" stop-color="#0D1526"/>
+    </linearGradient>
+
+    <linearGradient id="title-grad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#F8FAFC"/>
+      <stop offset="70%" stop-color="#E2E8F0"/>
+      <stop offset="100%" stop-color="#93C5FD"/>
+    </linearGradient>
+
+    <!-- Subtle grid pattern -->
+    <pattern id="dot-grid" width="24" height="24" patternUnits="userSpaceOnUse">
+      <circle cx="2" cy="2" r="1" fill="#334155" fill-opacity="0.45"/>
+    </pattern>
+
+    <clipPath id="card-clip">
+      <rect x="8" y="8" width="1184" height="324" rx="22"/>
+    </clipPath>
+  </defs>
+
+  <!-- Outer card -->
+  <g clip-path="url(#card-clip)">
+    <rect x="8" y="8" width="1184" height="324" fill="url(#bg-grad)"/>
+    <rect x="8" y="8" width="1184" height="324" fill="url(#dot-grid)"/>
+    <rect x="8" y="8" width="1184" height="324" fill="url(#glow-left)"/>
+    <rect x="8" y="8" width="1184" height="324" fill="url(#glow-right)"/>
+
+    <!-- Subtle geometric circuit lines -->
+    <g stroke="#1E293B" stroke-width="1.5" fill="none">
+      <path d="M 44 170 H 98"/>
+      <path d="M 292 170 H 326"/>
+      <path d="M 1015 84 H 1148"/>
+      <path d="M 1045 256 H 1148"/>
+      <path d="M 1075 170 H 1148"/>
+    </g>
+    <circle cx="44" cy="170" r="3" fill="#38BDF8" fill-opacity="0.45"/>
+    <circle cx="326" cy="170" r="3" fill="#34D399" fill-opacity="0.55"/>
+    <circle cx="1015" cy="84" r="3" fill="#6366F1" fill-opacity="0.55"/>
+    <circle cx="1045" cy="256" r="3" fill="#38BDF8" fill-opacity="0.45"/>
+    <circle cx="1075" cy="170" r="2.5" fill="#A78BFA" fill-opacity="0.45"/>
+  </g>
+
+  <!-- Card border -->
+  <rect x="8" y="8" width="1184" height="324" rx="22" fill="none" stroke="#26334D" stroke-width="1.5"/>
+
+  <!-- Left Emblem: Hexagonal Sandbox Shield + Agent Prompt & 5 System Nodes -->
+  <g transform="translate(195, 170)">
+    <!-- Outer soft halo -->
+    <circle cx="0" cy="0" r="96" fill="#38BDF8" fill-opacity="0.06"/>
+    <circle cx="0" cy="0" r="88" fill="none" stroke="#38BDF8" stroke-opacity="0.16" stroke-width="1" stroke-dasharray="4 6"/>
+
+    <!-- Hexagon shield -->
+    <polygon
+      points="0,-76 66,-38 66,38 0,76 -66,38 -66,-38"
+      fill="url(#shield-fill)"
+      stroke="url(#shield-grad)"
+      stroke-width="2.75"
+      stroke-linejoin="round"
+    />
+
+    <!-- Inner subtle hexagon -->
+    <polygon
+      points="0,-62 54,-31 54,31 0,62 -54,31 -54,-31"
+      fill="none"
+      stroke="#334155"
+      stroke-width="1"
+      stroke-opacity="0.7"
+    />
+
+    <!-- Constellation links between 5 system vertices -->
+    <g stroke="#38BDF8" stroke-opacity="0.35" stroke-width="1.2">
+      <line x1="0" y1="-62" x2="54" y2="-31"/>
+      <line x1="54" y1="-31" x2="54" y2="31"/>
+      <line x1="-54" y1="-31" x2="0" y2="-62"/>
+      <line x1="-54" y1="31" x2="-54" y2="-31"/>
+    </g>
+
+    <!-- 5 System nodes + base anchor node -->
+    <circle cx="0" cy="-62" r="4.5" fill="#38BDF8"/>   <!-- mise -->
+    <circle cx="54" cy="-31" r="4.5" fill="#A78BFA"/>  <!-- docmancer -->
+    <circle cx="54" cy="31" r="4.5" fill="#34D399"/>   <!-- junie -->
+    <circle cx="-54" cy="31" r="4.5" fill="#FBBF24"/>  <!-- litellm-proxy -->
+    <circle cx="-54" cy="-31" r="4.5" fill="#F472B6"/> <!-- safehouse -->
+    <circle cx="0" cy="62" r="3" fill="#475569"/>      <!-- core manifest -->
+
+    <!-- Center terminal prompt & agent spark -->
+    <path
+      d="M -28 -8 L -12 4 L -28 16"
+      fill="none"
+      stroke="#E2E8F0"
+      stroke-width="4"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+    />
+    <line
+      x1="-4" y1="16" x2="16" y2="16"
+      stroke="#38BDF8"
+      stroke-width="4"
+      stroke-linecap="round"
+    />
+    <!-- 4-point AI spark -->
+    <path
+      d="M 22 -24 Q 22 -12 34 -12 Q 22 -12 22 0 Q 22 -12 10 -12 Q 22 -12 22 -24 Z"
+      fill="#34D399"
+    />
+  </g>
+
+  <!-- Right Side Content -->
+  <g transform="translate(345, 72)">
+    <!-- Eyebrow tag -->
+    <rect x="0" y="0" width="246" height="28" rx="14" fill="#162238" stroke="#2D3F5E" stroke-width="1"/>
+    <circle cx="16" cy="14" r="4" fill="#34D399"/>
+    <text
+      x="28" y="18"
+      fill="#94A3B8"
+      font-family="SF Mono, ui-monospace, Menlo, Monaco, Consolas, monospace"
+      font-size="11.5"
+      font-weight="600"
+      letter-spacing="1.2"
+    >DECLARATIVE AGENT CONFIG</text>
+
+    <!-- Main Title -->
+    <text
+      x="0" y="84"
+      fill="url(#title-grad)"
+      font-family="-apple-system, BlinkMacSystemFont, SF Pro Display, Segoe UI, Helvetica, Arial, sans-serif"
+      font-size="48"
+      font-weight="700"
+      letter-spacing="-1"
+    >personal-agent-config</text>
+
+    <!-- Subtitle -->
+    <text
+      x="0" y="120"
+      fill="#94A3B8"
+      font-family="-apple-system, BlinkMacSystemFont, SF Pro Text, Segoe UI, Helvetica, Arial, sans-serif"
+      font-size="17.5"
+      font-weight="400"
+    >Idempotent manifests, lifecycle hooks, local LLM routing &amp; sandboxing for JetBrains Junie</text>
+
+    <!-- Divider accent -->
+    <rect x="0" y="144" width="76" height="3" rx="1.5" fill="url(#shield-grad)"/>
+
+    <!-- 5 System Pills -->
+    <g transform="translate(0, 168)" font-family="SF Mono, ui-monospace, Menlo, Monaco, Consolas, monospace" font-size="13" font-weight="500">
+      <!-- mise -->
+      <g transform="translate(0, 0)">
+        <rect x="0" y="0" width="76" height="32" rx="8" fill="#131D31" stroke="#26354F" stroke-width="1"/>
+        <circle cx="15" cy="16" r="4" fill="#38BDF8"/>
+        <text x="26" y="20.5" fill="#E2E8F0">mise</text>
+      </g>
+
+      <!-- docmancer -->
+      <g transform="translate(88, 0)">
+        <rect x="0" y="0" width="116" height="32" rx="8" fill="#131D31" stroke="#26354F" stroke-width="1"/>
+        <circle cx="15" cy="16" r="4" fill="#A78BFA"/>
+        <text x="26" y="20.5" fill="#E2E8F0">docmancer</text>
+      </g>
+
+      <!-- junie -->
+      <g transform="translate(216, 0)">
+        <rect x="0" y="0" width="84" height="32" rx="8" fill="#131D31" stroke="#26354F" stroke-width="1"/>
+        <circle cx="15" cy="16" r="4" fill="#34D399"/>
+        <text x="26" y="20.5" fill="#E2E8F0">junie</text>
+      </g>
+
+      <!-- litellm-proxy -->
+      <g transform="translate(312, 0)">
+        <rect x="0" y="0" width="148" height="32" rx="8" fill="#131D31" stroke="#26354F" stroke-width="1"/>
+        <circle cx="15" cy="16" r="4" fill="#FBBF24"/>
+        <text x="26" y="20.5" fill="#E2E8F0">litellm-proxy</text>
+      </g>
+
+      <!-- safehouse -->
+      <g transform="translate(472, 0)">
+        <rect x="0" y="0" width="116" height="32" rx="8" fill="#131D31" stroke="#26354F" stroke-width="1"/>
+        <circle cx="15" cy="16" r="4" fill="#F472B6"/>
+        <text x="26" y="20.5" fill="#E2E8F0">safehouse</text>
+      </g>
+    </g>
+  </g>
+</svg>
