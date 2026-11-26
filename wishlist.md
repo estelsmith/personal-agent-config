@@ -18,3 +18,5 @@ Random things I want to be consolidated into my personal agent configuration.
 - How can we remove the system `python` dependency from the `doctor`/`install` commands?
   - Maybe pure bash?
 - Move steel browser into this repo. See `~/repositories/firmprospects/engage/` for example setup.
+- Can we move away from custom `doctor`/`install` commands to Mise tasks, or a more generic config management system?
+  - Ansible, etc.
