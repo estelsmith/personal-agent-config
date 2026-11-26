@@ -8,6 +8,8 @@ Random things I want to be consolidated/fixed in my personal agent configuration
 - System installations run in arbitrary order, when in reality the `mise` system needs to be the very first. Without Mise, most of this will fall apart.
   - Implement a simple DAG that ensures that `doctor mise` comes back clean before anything the depends on it for doctor/install.
   - Don't automatically `install mise` when trying to install dependents. Simply don't allow the dependency to continue to installation if this prerequisite fails.
+- `litellm-proxy` system install exposes the raw `docker compose` ouputs, which streams hundred of lines when downloading/building images.
+  - I don't need to see the raw output. Just a summary of what steps are happening. Such as if `litellm-proxy` image downloads, note that a new image was downloaded. Or if a build actually took place, then note that.
 - `safehouse` is not being installed/managed by this repo. It's expected to already exist.
   - Verify this is true. I'm pretty sure it is.
 - I want to get rid of homebrew completely in exchange for Mise.
