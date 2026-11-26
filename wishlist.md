@@ -1,6 +1,6 @@
 # Wishlist
 
-Random things I want to be consolidated into my personal agent configuration.
+Random things I want to be consolidated/fixed in my personal agent configuration.
 
 ## Items
 
