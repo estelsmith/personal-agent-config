@@ -1,21 +1,19 @@
-# LiteLLM Proxy Setup
+# LiteLLM Proxy
 
-Runs a local Docker Compose [LiteLLM](https://docs.litellm.ai/) proxy on `http://127.0.0.1:4000` with complexity-based model routing (`anthropic-ladder` and `gemini-ladder`), PostgreSQL spend/prompt logging, a custom Gemini Decisions API adapter sidecar, and Junie-specific request/response callbacks.
+This system runs a local Docker Compose [LiteLLM](https://docs.litellm.ai/) gateway on `http://127.0.0.1:4000` with complexity-based model routing (`anthropic-ladder` and `gemini-ladder`), PostgreSQL request and spend logging, a custom Gemini Decisions API adapter sidecar, and Junie-specific request/response callbacks.
 
-## What It's For & Why We Use It
+## Why I Use It
 
-- **What it is for**: Acts as a local LLM gateway between coding agents and upstream Anthropic/Google APIs, exposing unified model aliases and request logging on `127.0.0.1:4000`.
-- **Why we use it**:
-  - **Cost & latency routing**: Instead of sending every turn to an expensive frontier model, `anthropic-ladder` and `gemini-ladder` classify prompt complexity and route simple, medium, complex, and reasoning turns to matching effort tiers.
-  - **Junie compatibility fixes**: Upstream LiteLLM does not handle Google's `v1beta/decisions` classifier API or Junie's Google GenAI/capability-filter quirks out of the box, and Junie's lightweight title/summary side-requests don't need full reasoning models.
-  - **Credential isolation & local logging**: Stores upstream `ANTHROPIC_API_KEY` and `GEMINI_API_KEY` in `~/litellm-proxy/.env` while exposing only a local `LITELLM_MASTER_KEY` to agent processes, and persists spend and prompt logs in local PostgreSQL.
+Sending every agent turn to a flagship reasoning model wastes both money and latency. With `anthropic-ladder` and `gemini-ladder`, the proxy classifies incoming prompts by complexity and routes simple, medium, complex, and reasoning turns to matching effort tiers.
 
-## How It Fits Into the Agent Config
+Running a local gateway also lets me smooth over Junie compatibility gaps that upstream LiteLLM doesn't handle out of the box (such as Google's `v1beta/decisions` classifier API, Junie's Google GenAI and capability-filter quirks, and pinning lightweight title/summary side-requests to a fast model). Upstream provider keys stay in `~/litellm-proxy/.env` while agent processes only see a local `LITELLM_MASTER_KEY`, and all spend and prompt logs stay in a local PostgreSQL container.
+
+## How It Fits In
 
 `litellm-proxy` is the model-serving layer of the stack:
 
-- **[`safehouse`](../safehouse/README.md)** forwards only `LITELLM_MASTER_KEY` into the Junie sandbox (`--env-pass=LITELLM_MASTER_KEY`), keeping real upstream provider API keys outside the agent's sandboxed environment.
-- Installing `litellm-proxy` automatically syncs `export LITELLM_MASTER_KEY=...` into `~/.bash_profile` so both interactive shells and `junie-safehouse` pick up the proxy key without manual duplication.
+- [`safehouse`](../safehouse/README.md) forwards only `LITELLM_MASTER_KEY` into the Junie sandbox (`--env-pass=LITELLM_MASTER_KEY`), keeping real upstream provider API keys outside the agent's sandboxed environment.
+- Installing `litellm-proxy` automatically syncs `export LITELLM_MASTER_KEY=...` into `~/.bash_profile` so interactive shells and `junie-safehouse` both pick up the proxy key without manual duplication.
 
 ## How It Works
 

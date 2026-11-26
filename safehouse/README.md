@@ -1,20 +1,19 @@
-# Safehouse Setup
+# Safehouse
 
-Sandboxes Junie CLI sessions on macOS using [Agent Safehouse](https://agent-safehouse.dev/) (`sandbox-exec`). Installs a wrapper script (`~/bin/junie-safehouse`), a machine-local Seatbelt profile (`~/.config/safehouse/junie-local.sb`), and a JetBrains ACP server configuration (`~/.jetbrains/acp.json`) so both terminal sessions and JetBrains IDEs launch Junie inside a tight filesystem/environment sandbox.
+This system sandboxes Junie CLI sessions on macOS using [Agent Safehouse](https://agent-safehouse.dev/) (`sandbox-exec`). It installs a wrapper script (`~/bin/junie-safehouse`), a machine-local Seatbelt profile (`~/.config/safehouse/junie-local.sb`), and a JetBrains ACP server configuration (`~/.jetbrains/acp.json`) so both terminal runs and JetBrains IDEs launch Junie inside the same sandbox.
 
-## What It's For & Why We Use It
+## Why I Use It
 
-- **What it is for**: Provides a drop-in sandboxed launcher (`junie-safehouse`) for running Junie from the terminal or inside JetBrains IDEs via ACP.
-- **Why we use it**:
-  - **Least-privilege isolation**: Autonomous coding agents execute shell commands and edit files; sandboxing restricts writes to the active project and explicit agent state directories while blocking access to unrelated projects, browser data, SSH keys, and host secrets.
-  - **Consistent policy across CLI & IDE**: Using the same wrapper script in both terminal runs and `~/.jetbrains/acp.json` guarantees identical sandbox boundaries everywhere Junie runs.
+Autonomous coding agents run shell commands and edit files, so I don't want them having unrestricted access to the rest of my machine. Sandboxing restricts writes to the active project and explicit agent state directories while blocking access to unrelated repos, browser data, SSH keys, and host secrets.
 
-## How It Fits Into the Agent Config
+Pointing both my terminal workflow and JetBrains IDE's `~/.jetbrains/acp.json` at the same `junie-safehouse` wrapper guarantees identical boundaries no matter where Junie runs.
 
-`safehouse` is the execution boundary that ties the other systems together safely at runtime:
+## How It Fits In
 
-- **[`junie`](../junie/README.md) & [`docmancer`](../docmancer/README.md)**: Grants read/write access to `~/.junie` (global `AGENTS.md`, skills, sessions) and `~/.docmancer` (local documentation index and embeddings), while allowing read access to `~/bin` and `~/.homebrew` so agents can run `mise exec -- docmancer` and [`mise`](../mise/README.md)-managed tools.
-- **[`litellm-proxy`](../litellm-proxy/README.md)**: Passes `LITELLM_MASTER_KEY` into the sandbox (`--env-pass=LITELLM_MASTER_KEY`) so Junie talks to the local proxy without ever seeing `ANTHROPIC_API_KEY` or `GEMINI_API_KEY` in its environment.
+`safehouse` is the execution boundary that ties the rest of the stack together safely at runtime:
+
+- [`junie`](../junie/README.md) & [`docmancer`](../docmancer/README.md): Grants read/write access to `~/.junie` (global `AGENTS.md`, skills, sessions) and `~/.docmancer` (local documentation index and embeddings), while allowing read access to `~/bin` and `~/.homebrew` so agents can run `mise exec -- docmancer` and [`mise`](../mise/README.md)-managed tools.
+- [`litellm-proxy`](../litellm-proxy/README.md): Passes `LITELLM_MASTER_KEY` into the sandbox (`--env-pass=LITELLM_MASTER_KEY`) so Junie talks to the local proxy without ever seeing `ANTHROPIC_API_KEY` or `GEMINI_API_KEY` in its environment.
 
 ## How It Works
 

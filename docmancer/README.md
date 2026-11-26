@@ -1,20 +1,18 @@
-# Docmancer Setup
+# Docmancer
 
-Configures [Docmancer](https://docmancer.dev/) for local documentation indexing and semantic/RAG lookup backed by SQLite, `sqlite-vec`, and local [Ollama](https://ollama.com/) embeddings, and installs a Junie Agent Skill for consulting indexed docs before writing code.
+This system configures [Docmancer](https://docmancer.dev/) for local documentation indexing and search backed by SQLite, `sqlite-vec`, and local [Ollama](https://ollama.com/) embeddings, and installs a Junie skill so the agent checks indexed docs before writing code.
 
-## What It's For & Why We Use It
+## Why I Use It
 
-- **What it is for**: Indexes external library/framework documentation locally and exposes token-budgeted search and page/section expansion strictly via `docmancer docs` (`docs query`, `docs add`, `docs list`, `docs sync`, `docs remove`), without using Docmancer's Shared Memory surface (`docmancer ask`).
-- **Why we use it**:
-  - **Accuracy over stale weights**: Coding agents look up current APIs, configuration schemas, and conventions from indexed docs instead of guessing from outdated training data.
-  - **Local & private embeddings**: Runs entirely locally with SQLite + `sqlite-vec` and Ollama (`embeddinggemma-2:740m`), avoiding per-query embedding fees or external vector database setup.
-  - **Budget-controlled context**: Returns compact, relevant sections rather than flooding the agent context window with raw web pages.
+Coding agents often guess at APIs, config schemas, and CLI flags from stale training data. Indexing official documentation locally lets Junie search current references inside a controlled token budget instead of guessing or pulling entire raw web pages into context.
 
-## How It Fits Into the Agent Config
+Everything runs locally with SQLite, `sqlite-vec`, and Ollama (`embeddinggemma-2:740m`), avoiding per-query embedding fees or an external vector database. Queries stick strictly to `docmancer docs` (`docs query`, `docs add`, `docs list`, `docs sync`, `docs remove`), leaving Docmancer's Shared Memory (`docmancer ask`) unused.
 
-- **Depends on [`mise`](../mise/README.md)**: `mise` installs `pipx:docmancer` (with `embeddings-openai` and `pysocks`), and `docmancer/mise-env.toml` places `OPENAI_BASE_URL` and `OPENAI_API_KEY` into Mise's `conf.d` so `mise exec -- docmancer` works identically from terminals, IDEs, and sandboxes.
-- **Extends [`junie`](../junie/README.md)**: Installs `~/.junie/skills/docmancer/SKILL.md` so Junie automatically knows when and how to search or index docs before coding against external libraries.
-- **Compatible with [`safehouse`](../safehouse/README.md)**: `safehouse/junie-local.sb` grants sandboxed Junie sessions read/write access to `~/.docmancer`, letting agents query and refresh the index safely from inside the sandbox.
+## How It Fits In
+
+- **Depends on [`mise`](../mise/README.md)**: `mise` installs `pipx:docmancer` (with `embeddings-openai` and `pysocks`), and `docmancer/mise-env.toml` places `OPENAI_BASE_URL` and `OPENAI_API_KEY` into Mise's `conf.d` so `mise exec -- docmancer` behaves the same in terminals, IDEs, and sandboxes.
+- **Extends [`junie`](../junie/README.md)**: Installs `~/.junie/skills/docmancer/SKILL.md` so Junie knows when and how to search or index docs before working with external libraries.
+- **Works inside [`safehouse`](../safehouse/README.md)**: `safehouse/junie-local.sb` grants sandboxed Junie sessions read/write access to `~/.docmancer`, letting the agent query and refresh the index safely from inside the sandbox.
 
 ## How It Works
 
@@ -33,15 +31,15 @@ Junie / User ──► mise exec -- docmancer ...
 Three pieces work together:
 
 1. **Docmancer configuration (`docmancer.yaml` → `~/.docmancer/docmancer.yaml`)**:
-   - **Index**: `sqlite` storing metadata in `./docmancer.db` and extracted pages in `./extracted` (resolved relative to `~/.docmancer/`, not the current working directory; `docmancer docs ...` automatically falls back to `~/.docmancer/docmancer.yaml` from any directory without a local `./docmancer.yaml`, or pass `--config ~/.docmancer/docmancer.yaml` to force the global index).
-   - **Vector store**: `sqlite-vec` for local vector search without an external vector database.
+   - **Index**: `sqlite` storing metadata in `./docmancer.db` and extracted pages in `./extracted` (resolved relative to `~/.docmancer/`, not the working directory; `docmancer docs ...` falls back to `~/.docmancer/docmancer.yaml` whenever a directory lacks its own `./docmancer.yaml`, or you can pass `--config ~/.docmancer/docmancer.yaml` to target the global index explicitly).
+   - **Vector store**: `sqlite-vec` for local vector search without a separate vector database.
    - **Embeddings**: `openai`-compatible provider pointing to `embeddinggemma-2:740m` (`dimensions: 768`).
    - **Retrieval**: `local` profile (hybrid FTS5 + `sqlite-vec` dense retrieval by default).
 2. **Mise environment injection (`mise-env.toml` → `~/.config/mise/conf.d/docmancer.toml`)**:
    - Sets `OPENAI_BASE_URL = "http://localhost:11434/v1"` and `OPENAI_API_KEY = "ollama"` inside Mise's `conf.d`.
-   - Running `mise exec -- docmancer ...` always picks up the Mise-managed `pipx:docmancer` binary (installed with `embeddings-openai` and `pysocks`) and these environment variables, even in non-interactive shells or IDE subshells where `~/.bash_profile` was not sourced.
+   - Running `mise exec -- docmancer ...` always resolves the Mise-managed `pipx:docmancer` binary (installed with `embeddings-openai` and `pysocks`) along with those environment variables, even in non-interactive shells or IDE subshells where `~/.bash_profile` wasn't sourced.
 3. **Junie Agent Skill (`skills/docmancer/SKILL.md` → `~/.junie/skills/docmancer/SKILL.md`)**:
-   - Guides Junie through documentation-only lookup (`docs list`, `docs query` with `--budget`, `--format`, `--expand` / `--expand page`, and `docs add` / `docs sync` / `docs remove`), warns against `docmancer ask` (Shared Memory), and enforces invoking `mise exec -- docmancer` rather than a bare system binary.
+   - Guides Junie through documentation-only lookup (`docs list`, `docs query` with `--budget`, `--format`, `--expand` / `--expand page`, and `docs add` / `docs sync` / `docs remove`), warns against `docmancer ask` (Shared Memory), and requires invoking `mise exec -- docmancer` rather than a bare binary on `PATH`.
 
 ## Prerequisites
 
@@ -67,7 +65,7 @@ bin/doctor docmancer
 
 ## Common Commands
 
-Always run Docmancer through `mise exec -- docmancer`, and use `docmancer docs ...` strictly for documentation lookup (not `docmancer ask`, which searches Shared Memory):
+Always run Docmancer through `mise exec -- docmancer`, and stick to `docmancer docs ...` for documentation lookup (not `docmancer ask`, which searches Shared Memory):
 
 ```bash
 # List currently indexed documentation sources (add --all for individual pages/files)
