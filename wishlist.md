@@ -8,3 +8,4 @@ Random things I want to be consolidated into my personal agent configuration.
   - Currently installed/configured globally, completely disconnected from the agent config repo.
 - `junie` or `litellm-proxy` should manage Junie custom models for LiteLLM in `~/.junie/models`
 - Can `junie` install Junie itself? Probably.
+- https://github.com/Graphify-Labs/graphify for codebase knowledge? Or maybe chunkhound, or something similar?
