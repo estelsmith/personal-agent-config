@@ -1226,7 +1226,16 @@ sys.exit(0)
 
         skill_text = skill_path.read_text(encoding="utf-8")
         self.assertIn("mise exec -- docmancer", skill_text)
+        self.assertIn("docmancer docs query", skill_text)
+        self.assertIn("docmancer docs sync", skill_text)
+        self.assertIn("--format json", skill_text)
+        self.assertIn("--expand page", skill_text)
         self.assertNotIn(".estel-local", skill_text)
+        self.assertNotIn("docmancer section", skill_text)
+        self.assertNotIn("docmancer page", skill_text)
+        self.assertNotIn("docs refresh", skill_text)
+        self.assertNotIn("--source ", skill_text)
+        self.assertNotIn("--name ", skill_text)
 
         # Doctor fails because pipx:docmancer is not yet configured in ~/.config/mise/config.toml.
         doc_before_tools = self._run(BIN_DOCTOR, ["docmancer"])

@@ -4,7 +4,7 @@ Configures [Docmancer](https://docmancer.dev/) for local documentation indexing 
 
 ## What It's For & Why We Use It
 
-- **What it is for**: Indexes external library/framework documentation locally and exposes token-budgeted search and page/section retrieval via `docmancer ask`, `section`, and `page`.
+- **What it is for**: Indexes external library/framework documentation locally and exposes token-budgeted search and page/section expansion strictly via `docmancer docs` (`docs query`, `docs add`, `docs list`, `docs sync`, `docs remove`)—without using Docmancer's Shared Memory surface (`docmancer ask`).
 - **Why we use it**:
   - **Accuracy over stale weights**: Coding agents look up current APIs, configuration schemas, and conventions from indexed docs instead of guessing from outdated training data.
   - **Local & private embeddings**: Runs entirely locally with SQLite + `sqlite-vec` and Ollama (`embeddinggemma-2:740m`), avoiding per-query embedding fees or external vector database setup.
@@ -33,15 +33,15 @@ Junie / User ──► mise exec -- docmancer ...
 Three pieces work together:
 
 1. **Docmancer configuration (`docmancer.yaml` → `~/.docmancer/docmancer.yaml`)**:
-   - **Index**: `sqlite` storing metadata in `./docmancer.db` and extracted pages in `./extracted`.
+   - **Index**: `sqlite` storing metadata in `./docmancer.db` and extracted pages in `./extracted` (resolved relative to `~/.docmancer/`, not the current working directory; `docmancer docs ...` automatically falls back to `~/.docmancer/docmancer.yaml` from any directory without a local `./docmancer.yaml`, or pass `--config ~/.docmancer/docmancer.yaml` to force the global index).
    - **Vector store**: `sqlite-vec` for local vector search without an external vector database.
    - **Embeddings**: `openai`-compatible provider pointing to `embeddinggemma-2:740m` (`dimensions: 768`).
-   - **Retrieval**: `local` profile.
+   - **Retrieval**: `local` profile (hybrid FTS5 + `sqlite-vec` dense retrieval by default).
 2. **Mise environment injection (`mise-env.toml` → `~/.config/mise/conf.d/docmancer.toml`)**:
    - Sets `OPENAI_BASE_URL = "http://localhost:11434/v1"` and `OPENAI_API_KEY = "ollama"` inside Mise's `conf.d`.
    - Running `mise exec -- docmancer ...` always picks up the Mise-managed `pipx:docmancer` binary (installed with `embeddings-openai` and `pysocks`) and these environment variables—even in non-interactive shells or IDE subshells where `~/.bash_profile` was not sourced.
 3. **Junie Agent Skill (`skills/docmancer/SKILL.md` → `~/.junie/skills/docmancer/SKILL.md`)**:
-   - Guides Junie through the lookup workflow (`ask --json --budget 2400` → `section` / `page` drill-down, `docs list`, and `docs add` / `docs refresh`) and enforces invoking `mise exec -- docmancer` rather than a bare system binary.
+   - Guides Junie through documentation-only lookup (`docs list`, `docs query` with `--budget`, `--format`, `--expand` / `--expand page`, and `docs add` / `docs sync` / `docs remove`), warns against `docmancer ask` (Shared Memory), and enforces invoking `mise exec -- docmancer` rather than a bare system binary.
 
 ## Prerequisites
 
@@ -67,25 +67,34 @@ bin/doctor docmancer
 
 ## Common Commands
 
-Always run Docmancer through `mise exec -- docmancer`:
+Always run Docmancer through `mise exec -- docmancer`, and use `docmancer docs ...` strictly for documentation lookup (not `docmancer ask`, which searches Shared Memory):
 
 ```bash
-# List currently indexed documentation sources
+# List currently indexed documentation sources (add --all for individual pages/files)
 mise exec -- docmancer docs list
+mise exec -- docmancer docs list --all
 
-# Index a documentation website or local docs directory
-mise exec -- docmancer docs add https://example.com/docs --name example
-mise exec -- docmancer docs add /path/to/docs --name my-lib
+# Index a documentation website, GitHub repo, or local docs directory
+mise exec -- docmancer docs add https://example.com/docs
+mise exec -- docmancer docs add https://github.com/owner/repo
+mise exec -- docmancer docs add /path/to/docs
 
-# Search indexed docs within a token budget
-mise exec -- docmancer ask "how does routing work" --source example --json --budget 2400
+# Search indexed docs within a token budget (include the tool/library name in the query)
+mise exec -- docmancer docs query "example routing configuration" --budget 2400
 
-# Drill down into a specific section or full page from an `ask` hit
-mise exec -- docmancer section <section_id> --json
-mise exec -- docmancer page <url_or_path> --json
+# Expand adjacent sections or full page context for top matches
+mise exec -- docmancer docs query "example routing configuration" --limit 2 --budget 3000 --expand
+mise exec -- docmancer docs query "example routing configuration" --limit 1 --budget 4000 --expand page
 
-# Refresh an existing source
-mise exec -- docmancer docs refresh example
+# Return structured JSON output
+mise exec -- docmancer docs query "example routing configuration" --format json
+
+# Refresh all existing sources or a single source
+mise exec -- docmancer docs sync
+mise exec -- docmancer docs sync https://example.com/docs
+
+# Remove an indexed source
+mise exec -- docmancer docs remove https://example.com/docs
 ```
 
 ## Files & Manifest
