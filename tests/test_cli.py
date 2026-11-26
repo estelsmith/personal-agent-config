@@ -1274,8 +1274,18 @@ sys.exit(0)
 
     def test_junie_install_and_doctor(self) -> None:
         agents_path = self.home / ".junie" / "AGENTS.md"
-        rule_path = REPO_ROOT / "junie" / "rules" / "bash-command-intent.md"
-        expected_text = rule_path.read_text(encoding="utf-8")
+        rule_files = sorted(
+            (REPO_ROOT / "junie" / "rules").glob("*.md"),
+            key=lambda p: p.name,
+        )
+        rule_path = rule_files[0]
+        expected_text = (
+            "\n\n".join(
+                p.read_text(encoding="utf-8").replace("\r\n", "\n").strip("\n")
+                for p in rule_files
+            )
+            + "\n"
+        )
 
         # Pre-install doctor fails because ~/.junie/AGENTS.md is missing.
         pre = self._run(BIN_DOCTOR, ["junie"])
@@ -1305,7 +1315,10 @@ sys.exit(0)
         # Re-running install is idempotent.
         reinst = self._run(BIN_INSTALL, ["junie"])
         self.assertEqual(reinst.returncode, 0, reinst.stdout + reinst.stderr)
-        self.assertIn("[OK] ~/.junie/AGENTS.md (unchanged, 1 rule(s))", reinst.stdout)
+        self.assertIn(
+            f"[OK] ~/.junie/AGENTS.md (unchanged, {len(rule_files)} rule(s))",
+            reinst.stdout,
+        )
 
         # Content drift triggers doctor failure and install repair.
         agents_path.write_text("# stale\n", encoding="utf-8")
@@ -1357,6 +1370,8 @@ sys.exit(0)
         bin_doctor = repo / "bin" / "doctor"
         bin_install = repo / "bin" / "install"
         rules_dir = repo / "junie" / "rules"
+        base_rules = sorted(rules_dir.glob("*.md"), key=lambda p: p.name)
+        total_rules = len(base_rules) + 2
 
         (rules_dir / "00-first.md").write_text("# First Rule\n\nAlpha.\n\n", encoding="utf-8")
         (rules_dir / "zz-last.md").write_text("# Last Rule\n\nOmega.", encoding="utf-8")
@@ -1364,18 +1379,21 @@ sys.exit(0)
 
         inst = self._run(bin_install, ["junie"])
         self.assertEqual(inst.returncode, 0, inst.stdout + inst.stderr)
-        self.assertIn("from 3 rule(s)", inst.stdout)
+        self.assertIn(f"from {total_rules} rule(s)", inst.stdout)
 
         agents_path = self.home / ".junie" / "AGENTS.md"
         content = agents_path.read_text(encoding="utf-8")
-        base_rule = (rules_dir / "bash-command-intent.md").read_text(encoding="utf-8").strip("\n")
-        expected = f"# First Rule\n\nAlpha.\n\n{base_rule}\n\n# Last Rule\n\nOmega.\n"
+        base_text = "\n\n".join(
+            p.read_text(encoding="utf-8").replace("\r\n", "\n").strip("\n")
+            for p in base_rules
+        )
+        expected = f"# First Rule\n\nAlpha.\n\n{base_text}\n\n# Last Rule\n\nOmega.\n"
         self.assertEqual(content, expected)
         self.assertNotIn("should not be included", content)
 
         doc_ok = self._run(bin_doctor, ["junie"])
         self.assertEqual(doc_ok.returncode, 0, doc_ok.stdout + doc_ok.stderr)
-        self.assertIn("3 rule(s)", doc_ok.stdout)
+        self.assertIn(f"{total_rules} rule(s)", doc_ok.stdout)
 
         # Updating a rule file causes doctor to fail until install re-syncs.
         (rules_dir / "zz-last.md").write_text("# Last Rule\n\nUpdated.\n", encoding="utf-8")

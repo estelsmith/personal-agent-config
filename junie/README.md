@@ -36,7 +36,7 @@ bin/doctor junie
 
 | Path | Role | Details |
 | --- | --- | --- |
-| `junie/rules/*.md` | Source rules | Modular Markdown rule files concatenated in sorted filename order (currently `bash-command-intent.md`). |
+| `junie/rules/*.md` | Source rules | Modular Markdown rule files concatenated in sorted filename order (e.g., `bash-command-intent.md`, `docmancer-first.md`). |
 | `junie/manifest` | Optional static files | Placeholder for any static `~/.junie/` files to sync directly. |
 | `junie/hooks/post-install` | Build & sync hook | Renders `junie/rules/*.md` into `~/.junie/AGENTS.md` (`0644`). |
 | `junie/hooks/doctor` | Health check hook | Verifies `~/.junie/AGENTS.md` exists as a regular file with matching SHA-256 and `0644` mode. |
