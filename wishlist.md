@@ -4,6 +4,7 @@ Random things I want to be consolidated/fixed in my personal agent configuration
 
 ## Items
 
+- `safehouse/acp.json` has a hardcoded user-path. Use `envsubst` or similar to pre-fill `${HOME}`.
 - `litellm-proxy` requires setting `.env` inside of it, and also seeds from `.env.example`.
   - Move `.env` out of `litellm-proxy` to `/litellm-proxy.env`. Require the file exist and contain all env vars.
   - Remove "seed" functionality all-together. It will result in a broken LiteLLM config anyway.
