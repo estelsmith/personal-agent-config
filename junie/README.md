@@ -16,7 +16,7 @@ Compiles modular Markdown rule files under `junie/rules/` into Junie's global in
 
 ## How It Works
 
-`junie/manifest` currently holds comments only—static `~/.junie/` files can be added there later, while `~/.junie/AGENTS.md` is generated dynamically by hooks:
+`junie/manifest` currently holds comments only. Static `~/.junie/` files can be added there later, while `~/.junie/AGENTS.md` is generated dynamically by hooks:
 
 1. `junie/hooks/_junie.py` discovers all non-empty `*.md` files in `junie/rules/` sorted by filename, normalizes line endings, and joins them with blank lines (`\n\n`).
 2. `junie/hooks/post-install` atomically writes the rendered output to `~/.junie/AGENTS.md` (`0644`) whenever the file is missing, is a symlink, or differs in SHA-256 hash or mode.

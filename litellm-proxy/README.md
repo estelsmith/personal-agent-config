@@ -107,8 +107,8 @@ Loaded via `litellm_settings.callbacks: custom_callbacks.proxy_handler_instance`
 | `litellm-proxy/gemini_decision_adapter.py` | `~/litellm-proxy/gemini_decision_adapter.py` | `0644` | `sync` | Starlette ASGI sidecar translating decisions requests to Gemini API. |
 | `litellm-proxy/Dockerfile.adapter` | `~/litellm-proxy/Dockerfile.adapter` | `0644` | `sync` | Container image definition (`python:3.12-slim` + `starlette`, `uvicorn`, `httpx`). |
 | `litellm-proxy/.env\|.env.example` | `~/litellm-proxy/.env` | `0600` | `sync-or-seed` | Syncs gitignored `.env` if present in repo; otherwise seeds from `.env.example`. |
-| `litellm-proxy/hooks/post-install` | *(hook)* | `0755` | — | Syncs `LITELLM_MASTER_KEY` to `~/.bash_profile` and manages Compose lifecycle. |
-| `litellm-proxy/hooks/doctor` | *(hook)* | `0755` | — | Checks `.env` keys, `~/.bash_profile` sync, Compose container health, and `:4000/health/liveliness`. |
+| `litellm-proxy/hooks/post-install` | *(hook)* | `0755` | n/a | Syncs `LITELLM_MASTER_KEY` to `~/.bash_profile` and manages Compose lifecycle. |
+| `litellm-proxy/hooks/doctor` | *(hook)* | `0755` | n/a | Checks `.env` keys, `~/.bash_profile` sync, Compose container health, and `:4000/health/liveliness`. |
 
 ## Hook Behavior & Operations
 

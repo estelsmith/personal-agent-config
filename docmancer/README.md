@@ -4,7 +4,7 @@ Configures [Docmancer](https://docmancer.dev/) for local documentation indexing 
 
 ## What It's For & Why We Use It
 
-- **What it is for**: Indexes external library/framework documentation locally and exposes token-budgeted search and page/section expansion strictly via `docmancer docs` (`docs query`, `docs add`, `docs list`, `docs sync`, `docs remove`)—without using Docmancer's Shared Memory surface (`docmancer ask`).
+- **What it is for**: Indexes external library/framework documentation locally and exposes token-budgeted search and page/section expansion strictly via `docmancer docs` (`docs query`, `docs add`, `docs list`, `docs sync`, `docs remove`), without using Docmancer's Shared Memory surface (`docmancer ask`).
 - **Why we use it**:
   - **Accuracy over stale weights**: Coding agents look up current APIs, configuration schemas, and conventions from indexed docs instead of guessing from outdated training data.
   - **Local & private embeddings**: Runs entirely locally with SQLite + `sqlite-vec` and Ollama (`embeddinggemma-2:740m`), avoiding per-query embedding fees or external vector database setup.
@@ -39,7 +39,7 @@ Three pieces work together:
    - **Retrieval**: `local` profile (hybrid FTS5 + `sqlite-vec` dense retrieval by default).
 2. **Mise environment injection (`mise-env.toml` → `~/.config/mise/conf.d/docmancer.toml`)**:
    - Sets `OPENAI_BASE_URL = "http://localhost:11434/v1"` and `OPENAI_API_KEY = "ollama"` inside Mise's `conf.d`.
-   - Running `mise exec -- docmancer ...` always picks up the Mise-managed `pipx:docmancer` binary (installed with `embeddings-openai` and `pysocks`) and these environment variables—even in non-interactive shells or IDE subshells where `~/.bash_profile` was not sourced.
+   - Running `mise exec -- docmancer ...` always picks up the Mise-managed `pipx:docmancer` binary (installed with `embeddings-openai` and `pysocks`) and these environment variables, even in non-interactive shells or IDE subshells where `~/.bash_profile` was not sourced.
 3. **Junie Agent Skill (`skills/docmancer/SKILL.md` → `~/.junie/skills/docmancer/SKILL.md`)**:
    - Guides Junie through documentation-only lookup (`docs list`, `docs query` with `--budget`, `--format`, `--expand` / `--expand page`, and `docs add` / `docs sync` / `docs remove`), warns against `docmancer ask` (Shared Memory), and enforces invoking `mise exec -- docmancer` rather than a bare system binary.
 

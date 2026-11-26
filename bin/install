@@ -156,7 +156,7 @@ def install_system(
                     else:
                         print(
                             f"  {style.yellow('[SEEDED]')} {entry.raw_target} "
-                            f"from {entry.rel_source} (mode {format_mode(entry.mode)}) — populate local secrets/config"
+                            f"from {entry.rel_source} (mode {format_mode(entry.mode)}); populate local secrets/config"
                         )
                         report.seeded += 1
                 continue

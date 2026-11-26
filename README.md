@@ -1,22 +1,24 @@
 # Personal Agent Config
 
-A declarative, idempotent configuration repository for managing a local AI coding agent environment on macOS. It pairs versioned configs, rules, and wrappers with a lightweight Python CLI (`bin/install` and `bin/doctor`) that syncs files to your home directory, handles secrets safely, runs lifecycle hooks, and verifies runtime health.
+This is my personal configuration repository for standing up and maintaining a local AI coding agent environment on **macOS** around **JetBrains** IDEs and **Junie**.
 
-## Systems & Why We Use Them
+I built it so I can bootstrap my entire agent setup from scratch on a fresh machine (declarative configs, global agent rules, local model routing, documentation search, and sandboxing) and verify that everything stays in sync over time. It's tailored specifically to my workflow, though if you run a similar macOS + JetBrains + Junie stack, feel free to take ideas from it for your own setup.
 
-Each top-level directory is an independent **system** solving one part of a reliable, cost-aware, and sandboxed coding-agent workflow around JetBrains Junie:
+## Systems
 
-| System | What It Is For | Why We Use It | Docs |
+Each top-level directory is an independent **system** handling one part of the stack. See each system's README for setup details, prerequisites, and internals:
+
+| System | What It Is For | Why I Use It | Docs |
 | --- | --- | --- | --- |
-| `mise` | Global runtime and CLI tool version management (`python`, `uv`, `docmancer`). | Keeps agent dependencies pinned and reproducible across interactive shells, IDE subshells, and sandboxed runs without relying on system packages. | [mise/README.md](mise/README.md) |
-| `docmancer` | Local documentation indexing, RAG search, and a Junie lookup skill. | Lets agents query curated, up-to-date library docs locally instead of guessing from stale training data or paying for external embeddings. | [docmancer/README.md](docmancer/README.md) |
-| `junie` | Modular global agent rules compiled into `~/.junie/AGENTS.md`. | Keeps personal coding-agent conventions version-controlled in small files and synced consistently across all projects. | [junie/README.md](junie/README.md) |
-| `litellm-proxy` | Local LLM gateway with complexity-based routing, logging, and Junie adapters. | Gives agents a single local endpoint, routes simple vs. complex turns to appropriate models to balance cost and quality, and keeps upstream provider keys out of the agent process. | [litellm-proxy/README.md](litellm-proxy/README.md) |
-| `safehouse` | Least-privilege sandboxing wrapper for Junie CLI and JetBrains IDE sessions. | Limits autonomous agents to the active project and explicit tool directories instead of giving them unrestricted access to the rest of the machine. | [safehouse/README.md](safehouse/README.md) |
+| `mise` | Runtime and CLI tool version management. | Keeps runtimes and agent tools pinned and reproducible across interactive shells, IDE subshells, and sandboxed runs without relying on system packages. | [mise/README.md](mise/README.md) |
+| `docmancer` | Local documentation indexing and search. | Lets the agent query curated, up-to-date library docs locally instead of relying on stale training data. | [docmancer/README.md](docmancer/README.md) |
+| `junie` | Global agent rules compiled into Junie's `AGENTS.md`. | Keeps my coding-agent conventions organized in small, version-controlled files and synced consistently across projects. | [junie/README.md](junie/README.md) |
+| `litellm-proxy` | Local LLM gateway with model routing and request logging. | Provides a single local endpoint, routes turns by complexity to balance cost and quality, and keeps provider API keys out of the agent process. | [litellm-proxy/README.md](litellm-proxy/README.md) |
+| `safehouse` | Sandboxing wrapper for Junie CLI and JetBrains IDE sessions. | Restricts the agent to the active project and explicit tool directories instead of giving it unrestricted access to the rest of the machine. | [safehouse/README.md](safehouse/README.md) |
 
 ## How It Works
 
-The repository is built around two conventions—**manifests** for declarative file placement and **hooks** for imperative setup and verification:
+The repository uses a lightweight Python CLI (`bin/install` and `bin/doctor`) built around two conventions: **manifests** for declarative file placement and **hooks** for system-specific setup and verification:
 
 ```text
 <system>/
@@ -38,19 +40,18 @@ The repository is built around two conventions—**manifests** for declarative f
    - `sync-or-seed` (`<primary>|<seed>`): Syncs `<primary>` when it exists in the repo (for example, a gitignored `.env`), or falls back to `seed` using `<seed>` (for example, `.env.example`).
 3. **Lifecycle hooks**: Before and after syncing files, `bin/install` runs executable scripts in `<system>/hooks/` for system-specific setup (such as installing runtimes, compiling generated configs, or managing background services). `bin/doctor` runs `<system>/hooks/doctor` after verifying manifest file hashes and permissions.
 
-## Quick Start (First-Time Setup)
+## Quick Start
 
 1. **Preview what will be installed** without touching your home directory or running hooks:
    ```bash
    bin/install --dry-run
    ```
-2. **Install all systems** (or target specific ones, e.g. `bin/install mise docmancer`):
+2. **Install all systems** (or target specific ones, e.g., `bin/install junie`):
    ```bash
    bin/install
    ```
-   > **Note:** Install `mise` before (or alongside) `docmancer`, since `docmancer` depends on the Mise-managed toolchain.
-3. **Populate secrets if prompted**: On a fresh machine without a gitignored `litellm-proxy/.env`, `bin/install` seeds `~/litellm-proxy/.env` from `litellm-proxy/.env.example` with placeholder keys. Follow [litellm-proxy/README.md](litellm-proxy/README.md) to fill in your API keys and recreate the proxy containers.
-4. **Verify your setup**:
+   > **Note:** Check individual system READMEs for machine prerequisites, install order dependencies, or first-time steps (such as filling in API keys when a system seeds a local config with placeholders).
+3. **Verify your setup**:
    ```bash
    bin/doctor
    ```
@@ -94,7 +95,7 @@ Any top-level directory `<system>/` with a `manifest` file or a `hooks/` directo
 
 ## Tests
 
-Run the CLI integration test suite (uses isolated temporary `HOME` directories and fake `docker`/`mise` shims):
+Run the CLI test suite (uses isolated temporary directories so it won't touch your actual home directory):
 
 ```bash
 python3 -m unittest discover -s tests
