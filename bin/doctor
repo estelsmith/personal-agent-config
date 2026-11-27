@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Check configuration sync and system health across discovered agent systems."""
+"""Verify installed files and live system health across my agent setup.
+
+Checks manifest hashes and permissions first, then runs each system's
+`hooks/doctor` so config drift or broken runtimes show up in one pass.
+"""
 
 from __future__ import annotations
 
@@ -26,6 +30,8 @@ from _lib import (
 
 @dataclass
 class DoctorReport:
+    """Per-system pass/warn/fail tallies collected during a doctor run."""
+
     name: str
     passed: int = 0
     warned: int = 0
@@ -34,7 +40,7 @@ class DoctorReport:
 
 
 def check_system(repo_root: Path, system, style: Style) -> DoctorReport:
-    """Run file and hook checks for one system."""
+    """Verify manifest targets and run `hooks/doctor` (if present) for one system."""
     report = DoctorReport(name=system.name)
 
     print(style.bold(f"==> {system.name}"))
@@ -164,6 +170,7 @@ def check_system(repo_root: Path, system, style: Style) -> DoctorReport:
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
+    """Parse CLI flags and optional system filters for `bin/doctor`."""
     parser = argparse.ArgumentParser(
         prog="doctor",
         description="Verify installed files (existence, SHA-256, mode) and run system health hooks.",
@@ -182,6 +189,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Run requested system checks and print the final health summary."""
     args = parse_args(sys.argv[1:] if argv is None else argv)
     repo_root = find_repo_root()
     style = Style()

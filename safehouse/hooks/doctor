@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Health check hook for safehouse wrapper, binaries, local profile, and ACP config."""
+"""Health check hook for the `safehouse` wrapper, binaries, local profile, and ACP config."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ from _safehouse import check_acp_json, check_local_profile
 
 
 def check_executable(path: Path, label: str) -> bool:
+    """Verify `path` exists and has execute permissions."""
     if not path.exists():
         print(f"[FAIL] missing {label}: {path}")
         return False
@@ -23,6 +24,7 @@ def check_executable(path: Path, label: str) -> bool:
 
 
 def main() -> int:
+    """Check wrapper/binaries, rendered Safehouse/ACP files, and `LITELLM_MASTER_KEY`."""
     home = Path.home()
     system_dir = Path(os.environ.get("SYSTEM_DIR") or Path(__file__).resolve().parent.parent)
     ok = True

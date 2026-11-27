@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Post-install hook for junie: concatenate junie/rules/*.md and sync ~/.junie/AGENTS.md."""
+"""Post-install hook for `junie` to compile `junie/rules/*.md` into `~/.junie/AGENTS.md`."""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ from _junie import sync_agents_md
 
 
 def main() -> int:
+    """Render and sync `~/.junie/AGENTS.md` from `junie/rules/*.md`."""
     home = Path.home()
     system_dir = Path(os.environ.get("SYSTEM_DIR") or Path(__file__).resolve().parent.parent)
     target = home / ".junie" / "AGENTS.md"

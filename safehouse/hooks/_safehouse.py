@@ -1,4 +1,9 @@
-"""Helpers for rendering safehouse/policies/*.sb and safehouse/acp.json."""
+"""Helpers for rendering `safehouse/policies/*.sb` and `safehouse/acp.json`.
+
+Keeping `.sb` snippets split per tool makes sandbox overrides easy to review,
+and `acp.json` needs `${HOME}` expanded at install time because JetBrains ACP
+expects concrete paths rather than shell variables.
+"""
 
 from __future__ import annotations
 
@@ -22,7 +27,7 @@ POLICY_BANNER = (
 
 
 def discover_policy_files(policies_dir: Path) -> list[Path]:
-    """Return sorted *.sb policy files inside safehouse/policies/."""
+    """Return sorted `*.sb` policy files inside `safehouse/policies/`."""
     if not policies_dir.is_dir():
         raise FileNotFoundError(f"missing policies directory: {policies_dir}")
     policy_files = sorted(
@@ -35,7 +40,11 @@ def discover_policy_files(policies_dir: Path) -> list[Path]:
 
 
 def render_local_profile(policies_dir: Path) -> tuple[str, list[Path]]:
-    """Concatenate safehouse/policies/*.sb into ~/.config/safehouse/junie-local.sb text."""
+    """Concatenate `safehouse/policies/*.sb` under the local-profile banner.
+
+    Fails on empty policy files so a blank `.sb` stub can't slip into the active
+    sandbox profile.
+    """
     policy_files = discover_policy_files(policies_dir)
     chunks: list[str] = []
     for path in policy_files:
@@ -48,7 +57,7 @@ def render_local_profile(policies_dir: Path) -> tuple[str, list[Path]]:
 
 
 def render_acp_json(system_dir: Path, home: Path | None = None) -> str:
-    """Read safehouse/acp.json and expand ${HOME} into valid JSON text."""
+    """Expand `${HOME}` in `safehouse/acp.json` and validate the resulting JSON."""
     src_path = system_dir / "acp.json"
     if not src_path.is_file():
         raise FileNotFoundError(f"missing ACP template: {src_path}")
@@ -62,12 +71,12 @@ def render_acp_json(system_dir: Path, home: Path | None = None) -> str:
 
 
 def sha256_bytes(data: bytes) -> str:
-    """Compute hex SHA-256 digest for bytes."""
+    """Compute the hex SHA-256 digest for raw bytes."""
     return hashlib.sha256(data).hexdigest()
 
 
 def sha256_file(path: Path) -> str:
-    """Compute hex SHA-256 digest for a file."""
+    """Compute the hex SHA-256 digest for a file."""
     digest = hashlib.sha256()
     with path.open("rb") as fh:
         while True:
@@ -79,7 +88,7 @@ def sha256_file(path: Path) -> str:
 
 
 def atomic_write_text(dst: Path, content: str, mode: int = ACP_MODE) -> None:
-    """Write UTF-8 text to dst atomically with exact permissions."""
+    """Write UTF-8 text to `dst` through a temp file and `os.replace`."""
     dst.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_name = tempfile.mkstemp(prefix=f".{dst.name}.", dir=str(dst.parent))
     tmp_path = Path(tmp_name)
@@ -97,7 +106,7 @@ def atomic_write_text(dst: Path, content: str, mode: int = ACP_MODE) -> None:
 def sync_acp_json(
     system_dir: Path, target: Path, home: Path | None = None
 ) -> tuple[bool, str]:
-    """Render safehouse/acp.json and sync ~/.jetbrains/acp.json."""
+    """Render `safehouse/acp.json` and sync `~/.jetbrains/acp.json` if missing or stale."""
     try:
         rendered = render_acp_json(system_dir, home=home)
     except (OSError, ValueError) as exc:
@@ -156,7 +165,7 @@ def sync_acp_json(
 def check_acp_json(
     system_dir: Path, target: Path, home: Path | None = None
 ) -> tuple[bool, str]:
-    """Verify ~/.jetbrains/acp.json exists, is a regular file, and matches rendered acp.json."""
+    """Verify `~/.jetbrains/acp.json` is a regular file matching rendered `acp.json`."""
     try:
         rendered = render_acp_json(system_dir, home=home)
     except (OSError, ValueError) as exc:
@@ -208,7 +217,7 @@ def check_acp_json(
 
 
 def sync_local_profile(system_dir: Path, target: Path) -> tuple[bool, str]:
-    """Render safehouse/policies/*.sb and sync ~/.config/safehouse/junie-local.sb."""
+    """Render `safehouse/policies/*.sb` and sync `~/.config/safehouse/junie-local.sb`."""
     policies_dir = system_dir / "policies"
     try:
         rendered, policy_files = render_local_profile(policies_dir)
@@ -298,7 +307,7 @@ def sync_local_profile(system_dir: Path, target: Path) -> tuple[bool, str]:
 
 
 def check_local_profile(system_dir: Path, target: Path) -> tuple[bool, str]:
-    """Verify ~/.config/safehouse/junie-local.sb exists, is a regular file, and matches policies/*.sb."""
+    """Verify `~/.config/safehouse/junie-local.sb` is a regular file matching `policies/*.sb`."""
     policies_dir = system_dir / "policies"
     try:
         rendered, policy_files = render_local_profile(policies_dir)

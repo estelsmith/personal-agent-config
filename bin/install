@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Install missing or mismatched config files and run system lifecycle hooks."""
+"""Sync config files from repo manifests and run system lifecycle hooks.
+
+Writes targets atomically so interrupted runs don't leave half-written dotfiles
+around `~/`, and preserves `seed` targets once created so local secrets stay put.
+"""
 
 from __future__ import annotations
 
@@ -28,6 +32,8 @@ from _lib import (
 
 @dataclass
 class SystemReport:
+    """Per-system install counts and hook status for the final summary."""
+
     name: str
     installed: int = 0
     updated: int = 0
@@ -39,7 +45,11 @@ class SystemReport:
 
 
 def _atomic_install(src: Path, dst: Path, mode: int) -> None:
-    """Copy src to dst atomically with exact permissions."""
+    """Copy `src` to `dst` through a temp file and `os.replace`.
+
+    Writing beside the target and swapping atomically avoids leaving partial
+    files or loose permissions if an install fails mid-copy.
+    """
     dst.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_name = tempfile.mkstemp(prefix=f".{dst.name}.", dir=str(dst.parent))
     tmp_path = Path(tmp_name)
@@ -63,7 +73,11 @@ def install_system(
     no_hooks: bool,
     force: bool,
 ) -> SystemReport:
-    """Install/update files and execute lifecycle hooks for a single system."""
+    """Run `pre-install`, sync manifest entries, and run `post-install` for one system.
+
+    Passes `FILES_CHANGED` into `post-install` so expensive hooks (like Compose
+    restarts) only fire when something actually changed.
+    """
     report = SystemReport(name=system.name)
     print(style.bold(f"==> {system.name}"))
 
@@ -316,6 +330,7 @@ def install_system(
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
+    """Parse CLI flags and optional system filters for `bin/install`."""
     parser = argparse.ArgumentParser(
         prog="install",
         description="Install missing or mismatched files and run system post-install hooks.",
@@ -351,6 +366,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Install selected systems and print a per-system summary."""
     args = parse_args(sys.argv[1:] if argv is None else argv)
     repo_root = find_repo_root()
     style = Style()

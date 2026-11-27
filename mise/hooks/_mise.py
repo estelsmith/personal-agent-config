@@ -1,4 +1,10 @@
-"""Helpers for managing ~/bin/mise, ~/.bash_profile activation, and global Mise tools."""
+"""Helpers for managing `~/bin/mise`, `~/.bash_profile` activation, and global tools.
+
+I run `mise` as a single self-bootstrapping binary under `~/bin/mise` rather
+than pulling it through Homebrew. That keeps `bin/install mise` working on a
+clean Mac with just `/usr/bin/python3` (hence the minimal fallback TOML parser
+when `tomllib` isn't available yet).
+"""
 
 from __future__ import annotations
 
@@ -30,12 +36,13 @@ _DIRENV_HOOK_RE = re.compile(r"\bdirenv\s+hook\s+bash\b")
 
 @dataclass(frozen=True)
 class ToolSpec:
-    """Normalized global Mise tool specification from [tools]."""
+    """Normalized `[tools]` entry parsed from `tools.toml`."""
 
     version: str
     options: tuple[tuple[str, str], ...] = ()
 
     def to_cli_spec(self, tool: str) -> str:
+        """Format this entry as `tool@version` or `tool[opts]@version` for `mise use`."""
         if self.options:
             opts = ",".join(f"{k}={v}" for k, v in self.options)
             return f"{tool}[{opts}]@{self.version}"
@@ -43,6 +50,7 @@ class ToolSpec:
 
 
 def _normalize_tool_spec(raw: object) -> ToolSpec:
+    """Normalize a raw `[tools]` value (string or inline table) into a `ToolSpec`."""
     if isinstance(raw, dict):
         version = str(raw.get("version", "")).strip()
         opts: dict[str, str] = {}
@@ -67,6 +75,11 @@ def _normalize_tool_spec(raw: object) -> ToolSpec:
 
 
 def _parse_fallback_toml_value(raw_val: str) -> object:
+    """Parse a single TOML value when `tomllib` isn't available.
+
+    Handles plain strings and simple one-line inline tables like
+    `{ version = "...", extras = ["a", "b"] }` used by `mise/tools.toml`.
+    """
     val = raw_val.strip()
     if val.startswith("{") and val.endswith("}"):
         inner = val[1:-1].strip()
@@ -107,7 +120,7 @@ def _parse_fallback_toml_value(raw_val: str) -> object:
 
 
 def parse_toml_tools(toml_path: Path) -> dict[str, ToolSpec]:
-    """Read the [tools] table from a TOML file as {tool_name: ToolSpec}."""
+    """Read the `[tools]` table from `toml_path` into `{tool_name: ToolSpec}`."""
     raw = toml_path.read_text(encoding="utf-8")
     if tomllib is not None:
         data = tomllib.loads(raw)
@@ -135,7 +148,7 @@ def parse_toml_tools(toml_path: Path) -> dict[str, ToolSpec]:
 
 
 def load_desired_tools(system_dir: Path) -> dict[str, ToolSpec]:
-    """Load global tool specifications from mise/tools.toml."""
+    """Load global tool specs from `mise/tools.toml`."""
     tools_file = system_dir / "tools.toml"
     if not tools_file.is_file():
         raise FileNotFoundError(f"missing {tools_file}")
@@ -146,6 +159,7 @@ def load_desired_tools(system_dir: Path) -> dict[str, ToolSpec]:
 
 
 def _atomic_write_text(path: Path, content: str, mode: int) -> None:
+    """Write `content` atomically beside `path` with the requested mode."""
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=str(path.parent))
     tmp_path = Path(tmp_name)
@@ -161,6 +175,7 @@ def _atomic_write_text(path: Path, content: str, mode: int) -> None:
 
 
 def _has_active_mise_activate(content: str) -> bool:
+    """Return True if any non-comment line calls `mise activate bash`."""
     for line in content.splitlines():
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
@@ -173,7 +188,7 @@ def _has_active_mise_activate(content: str) -> bool:
 
 
 def check_bash_profile(bash_profile: Path) -> tuple[bool, str]:
-    """Verify ~/.bash_profile contains an active `mise activate bash` hook."""
+    """Verify `~/.bash_profile` has an active `mise activate bash` line."""
     if bash_profile.is_symlink() and not bash_profile.exists():
         return False, f"[FAIL] ~/.bash_profile is a broken symlink -> {os.readlink(bash_profile)}"
     if bash_profile.is_dir():
@@ -194,9 +209,11 @@ def check_bash_profile(bash_profile: Path) -> tuple[bool, str]:
 
 
 def sync_bash_profile(bash_profile: Path) -> tuple[str, str]:
-    """Ensure ~/.bash_profile contains `eval \"$(mise activate bash)\"`.
+    """Add `eval \"$(mise activate bash)\"` to `~/.bash_profile` if it's missing.
 
-    Returns (status, message) where status is 'ok', 'added', or 'error'.
+    Inserts Mise activation ahead of `direnv hook bash` when present so direnv
+    sees Mise-managed runtimes on startup. Returns `(status, message)` where
+    status is `'ok'`, `'added'`, or `'error'`.
     """
     if bash_profile.is_symlink() and not bash_profile.exists():
         return "error", f"[FAIL] ~/.bash_profile is a broken symlink -> {os.readlink(bash_profile)}"
@@ -234,7 +251,7 @@ def sync_bash_profile(bash_profile: Path) -> tuple[str, str]:
 
 
 def detect_platform() -> tuple[str, str]:
-    """Return (os_name, arch_name) matching jdx/mise release asset naming."""
+    """Map macOS/Linux host OS and CPU arch to `jdx/mise` release asset names."""
     sys_name = platform.system().lower()
     if sys_name == "darwin":
         os_name = "macos"
@@ -257,6 +274,7 @@ def detect_platform() -> tuple[str, str]:
 
 
 def _resolve_latest_tag() -> str:
+    """Resolve the newest `jdx/mise` release tag (honoring `MISE_RELEASE_TAG`)."""
     override = os.environ.get("MISE_RELEASE_TAG", "").strip()
     if override:
         return override
@@ -284,6 +302,7 @@ def _resolve_latest_tag() -> str:
 
 
 def _download_file(url: str, dst: Path) -> None:
+    """Download `url` to `dst`, preferring `curl` before falling back to `urllib`."""
     if shutil.which("curl"):
         res = subprocess.run(
             ["curl", "-fsSL", "-o", str(dst), url],
@@ -303,7 +322,7 @@ def _download_file(url: str, dst: Path) -> None:
 
 
 def check_mise_binary(mise_bin: Path) -> tuple[bool, str]:
-    """Check that ~/bin/mise exists, is executable, and reports --version."""
+    """Verify `~/bin/mise` exists, is executable, and responds to `--version`."""
     if mise_bin.is_symlink() and not mise_bin.exists():
         return False, f"[FAIL] ~/bin/mise is a broken symlink -> {os.readlink(mise_bin)}"
     if mise_bin.is_dir():
@@ -322,7 +341,7 @@ def check_mise_binary(mise_bin: Path) -> tuple[bool, str]:
 
 
 def ensure_mise_binary(mise_bin: Path) -> tuple[str, str]:
-    """Ensure ~/bin/mise exists and is executable; download from GitHub releases if missing."""
+    """Download and verify `~/bin/mise` from GitHub releases if it's missing."""
     if mise_bin.is_symlink() and not mise_bin.exists():
         return "error", f"[FAIL] ~/bin/mise is a broken symlink -> {os.readlink(mise_bin)}"
     if mise_bin.is_dir():
@@ -362,6 +381,7 @@ def ensure_mise_binary(mise_bin: Path) -> tuple[str, str]:
 
 
 def _installed_versions_by_tool(mise_bin: Path, home: Path) -> tuple[bool, dict[str, list[dict]], str]:
+    """Query `mise ls --global --json` and return `(ok, data, error_message)`."""
     res = subprocess.run(
         [str(mise_bin), "ls", "--global", "--json"],
         cwd=str(home),
@@ -386,7 +406,7 @@ def check_global_tools(
     desired_tools: dict[str, ToolSpec],
     home: Path,
 ) -> tuple[bool, list[str]]:
-    """Verify global ~/.config/mise/config.toml has desired tools and mise reports them installed."""
+    """Verify `~/.config/mise/config.toml` and installed global tools match `mise/tools.toml`."""
     messages: list[str] = []
     if not config_toml.is_file():
         return False, [
@@ -439,6 +459,7 @@ def check_global_tools(
 
 
 def _is_version_installed(ls_data: dict[str, list[dict]], tool: str, version: str) -> bool:
+    """Return True if `ls_data` shows `tool@version` is already installed."""
     for item in ls_data.get(tool, []):
         if (
             isinstance(item, dict)
@@ -455,7 +476,7 @@ def sync_global_tools(
     desired_tools: dict[str, ToolSpec],
     home: Path,
 ) -> tuple[bool, list[str]]:
-    """Configure and install desired global tools via `mise use --global`."""
+    """Configure and install global tools via `mise use --global`."""
     already_ok, _ = check_global_tools(mise_bin, config_toml, desired_tools, home)
     if already_ok:
         summary = ", ".join(spec.to_cli_spec(k) for k, spec in desired_tools.items())
@@ -465,7 +486,7 @@ def sync_global_tools(
     ls_ok, ls_data, _ = _installed_versions_by_tool(mise_bin, home)
 
     # `mise use --global` skips reinstalling when the target version is already on disk
-    # even if tool options (such as pipx extras) changed; force-reinstall those tools.
+    # even if tool options (think pipx extras) changed; force-reinstall those tools.
     force_reinstall: list[str] = []
     if ls_ok:
         for tool, expected_spec in desired_tools.items():

@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Health check hook for docmancer (Mise environment injection and `mise exec -- docmancer`)."""
+"""Health check hook for docmancer (Mise environment injection and `mise exec -- docmancer`).
+
+Verifies the Mise toolchain, the LiteLLM proxy env vars from `docmancer.toml`,
+and that `docmancer` actually ships the `openai` and `socks` extras it needs.
+"""
 
 from __future__ import annotations
 
@@ -12,6 +16,11 @@ from pathlib import Path
 
 
 def _read_shebang_interpreter(script_path: Path) -> str | None:
+    """Extract the Python interpreter from `script_path`'s shebang.
+
+    Probes that exact interpreter instead of relying on global PATH, since
+    `pipx:docmancer` runs inside its own Mise-managed virtualenv.
+    """
     if not script_path.is_file():
         return None
     try:
@@ -31,6 +40,7 @@ def _read_shebang_interpreter(script_path: Path) -> str | None:
 
 
 def main() -> int:
+    """Check `~/bin/mise`, Mise env vars, and `docmancer` extras."""
     home = Path.home()
     mise_bin = home / "bin" / "mise"
 

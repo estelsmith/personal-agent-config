@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Post-install hook for mise: install ~/bin/mise, activate in ~/.bash_profile, and apply global tools."""
+"""Post-install hook for `mise`: install `~/bin/mise`, wire up `~/.bash_profile`, and apply global tools."""
 
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ from _mise import (
 
 
 def main() -> int:
+    """Install `~/bin/mise`, enable bash activation, and sync `mise/tools.toml`."""
     home = Path.home()
     system_dir = Path(os.environ.get("SYSTEM_DIR") or Path(__file__).resolve().parent.parent)
     mise_bin = home / "bin" / "mise"

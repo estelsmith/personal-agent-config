@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Health check hook for litellm-proxy (.env keys, ~/.bash_profile, and Docker Compose stack)."""
+"""Health check hook for `litellm-proxy` (`.env` keys, `~/.bash_profile`, and Compose).
+
+Checks local secrets and shell exports before hitting Docker so missing
+config fails fast with clear fixes.
+"""
 
 from __future__ import annotations
 
@@ -25,6 +29,7 @@ PLACEHOLDER_VALUES = {
 
 
 def check_env_file(env_path: Path) -> bool:
+    """Verify `~/litellm-proxy/.env` defines required keys and warn on placeholder values."""
     if not env_path.is_file():
         print(f"[FAIL] missing {env_path} (run bin/install to seed from .env.example)")
         return False
@@ -44,6 +49,7 @@ def check_env_file(env_path: Path) -> bool:
 
 
 def main() -> int:
+    """Run `.env`, `~/.bash_profile`, Docker daemon, and Compose health checks."""
     home = Path.home()
     target_dir = home / "litellm-proxy"
     compose_file = target_dir / "docker-compose.yml"

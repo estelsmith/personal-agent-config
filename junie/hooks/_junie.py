@@ -1,4 +1,9 @@
-"""Helpers for concatenating junie/rules/*.md and syncing ~/.junie/AGENTS.md."""
+"""Helpers for stitching `junie/rules/*.md` into `~/.junie/AGENTS.md`.
+
+Keeping rules split by topic under `junie/rules/` is much easier to maintain
+than one giant `~/.junie/AGENTS.md`, and this module handles deterministic
+concatenation plus atomic updates.
+"""
 
 from __future__ import annotations
 
@@ -13,7 +18,7 @@ AGENTS_MODE = 0o644
 
 
 def discover_rule_files(rules_dir: Path) -> list[Path]:
-    """Return sorted *.md rule files inside junie/rules/."""
+    """Return sorted `*.md` rule files inside `junie/rules/`."""
     if not rules_dir.is_dir():
         raise FileNotFoundError(f"missing rules directory: {rules_dir}")
     rule_files = sorted(
@@ -26,7 +31,11 @@ def discover_rule_files(rules_dir: Path) -> list[Path]:
 
 
 def render_agents_md(rules_dir: Path) -> tuple[str, list[Path]]:
-    """Concatenate junie/rules/*.md into a single markdown document."""
+    """Concatenate `junie/rules/*.md` into one normalized markdown document.
+
+    Fails fast on empty rule files so an accidental blank stub doesn't silently
+    slip into `~/.junie/AGENTS.md`.
+    """
     rule_files = discover_rule_files(rules_dir)
     chunks: list[str] = []
     for path in rule_files:
@@ -39,12 +48,12 @@ def render_agents_md(rules_dir: Path) -> tuple[str, list[Path]]:
 
 
 def sha256_bytes(data: bytes) -> str:
-    """Compute hex SHA-256 digest for bytes."""
+    """Compute the hex SHA-256 digest for raw bytes."""
     return hashlib.sha256(data).hexdigest()
 
 
 def sha256_file(path: Path) -> str:
-    """Compute hex SHA-256 digest for a file."""
+    """Compute the hex SHA-256 digest for a file."""
     digest = hashlib.sha256()
     with path.open("rb") as fh:
         while True:
@@ -56,7 +65,7 @@ def sha256_file(path: Path) -> str:
 
 
 def atomic_write_text(dst: Path, content: str, mode: int = AGENTS_MODE) -> None:
-    """Write UTF-8 text to dst atomically with exact permissions."""
+    """Write UTF-8 text to `dst` through a temp file and `os.replace`."""
     dst.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_name = tempfile.mkstemp(prefix=f".{dst.name}.", dir=str(dst.parent))
     tmp_path = Path(tmp_name)
@@ -72,7 +81,7 @@ def atomic_write_text(dst: Path, content: str, mode: int = AGENTS_MODE) -> None:
 
 
 def sync_agents_md(system_dir: Path, target: Path) -> tuple[bool, str]:
-    """Render junie/rules/*.md and sync ~/.junie/AGENTS.md."""
+    """Render `junie/rules/*.md` and sync `~/.junie/AGENTS.md` if missing or stale."""
     rules_dir = system_dir / "rules"
     try:
         rendered, rule_files = render_agents_md(rules_dir)
@@ -140,7 +149,7 @@ def sync_agents_md(system_dir: Path, target: Path) -> tuple[bool, str]:
 
 
 def check_agents_md(system_dir: Path, target: Path) -> tuple[bool, str]:
-    """Verify ~/.junie/AGENTS.md exists, is a regular file, and matches rendered rules."""
+    """Verify `~/.junie/AGENTS.md` is a regular file matching the rendered rules."""
     rules_dir = system_dir / "rules"
     try:
         rendered, rule_files = render_agents_md(rules_dir)

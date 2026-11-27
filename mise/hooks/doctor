@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Health check hook for mise (~/bin/mise, ~/.bash_profile hook, and global tools)."""
+"""Health check hook for `mise` (`~/bin/mise`, `~/.bash_profile` activation, and global tools)."""
 
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ from _mise import (
 
 
 def main() -> int:
+    """Verify `~/bin/mise`, `~/.bash_profile` activation, and global tool versions."""
     home = Path.home()
     system_dir = Path(os.environ.get("SYSTEM_DIR") or Path(__file__).resolve().parent.parent)
     mise_bin = home / "bin" / "mise"

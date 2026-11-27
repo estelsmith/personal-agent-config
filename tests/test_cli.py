@@ -1,4 +1,8 @@
-"""Integration tests for bin/doctor and bin/install."""
+"""Isolated integration tests for bin/doctor, bin/install, and system hooks.
+
+Runs everything against temp `HOME` directories and fake `docker` / `mise`
+shims so tests never touch live dotfiles or containers.
+"""
 
 from __future__ import annotations
 
@@ -21,6 +25,8 @@ BIN_INSTALL = REPO_ROOT / "bin" / "install"
 
 
 class _OkHandler(http.server.BaseHTTPRequestHandler):
+    """Minimal HTTP handler returning 200 OK to stand in for LiteLLM's health endpoint."""
+
     def do_GET(self):
         self.send_response(200)
         self.end_headers()
@@ -31,6 +37,8 @@ class _OkHandler(http.server.BaseHTTPRequestHandler):
 
 
 class CliTests(unittest.TestCase):
+    """End-to-end CLI tests across all systems using isolated temp homes and shims."""
+
     def setUp(self) -> None:
         self.tmp = Path(tempfile.mkdtemp(prefix="agent-cfg-test-"))
         self.home = self.tmp / "home"
@@ -44,6 +52,7 @@ class CliTests(unittest.TestCase):
         shutil.rmtree(self.tmp, ignore_errors=True)
 
     def _base_env(self, extra: dict[str, str] | None = None) -> dict[str, str]:
+        """Build an isolated subprocess env pointing `HOME` and `PATH` at temp dirs."""
         env = os.environ.copy()
         env["HOME"] = str(self.home)
         env["NO_COLOR"] = "1"
@@ -60,6 +69,7 @@ class CliTests(unittest.TestCase):
         daemon_ok: bool = True,
         containers: list[dict] | None = None,
     ) -> None:
+        """Drop a stateful `docker` shim on `PATH` so Compose hooks run without Docker."""
         if containers is None:
             containers = [
                 {"Service": "litellm", "State": "running", "Health": ""},
@@ -117,6 +127,7 @@ sys.exit(0)
     def _run(
         self, cmd: Path, args: list[str], extra_env: dict[str, str] | None = None
     ) -> subprocess.CompletedProcess[str]:
+        """Run `bin/doctor` or `bin/install` with isolated env and captured output."""
         return subprocess.run(
             [str(cmd), *args],
             env=self._base_env(extra_env),
@@ -128,6 +139,7 @@ sys.exit(0)
     def _run_tty(
         self, cmd: Path, args: list[str], extra_env: dict[str, str] | None = None
     ) -> tuple[int, str]:
+        """Run a CLI command attached to a PTY so ANSI color branches activate."""
         env = self._base_env(extra_env)
         env.pop("NO_COLOR", None)
         master_fd, slave_fd = pty.openpty()
@@ -159,6 +171,7 @@ sys.exit(0)
         return rc, b"".join(chunks).decode("utf-8", errors="replace")
 
     def _make_isolated_repo(self, *, repo_env_content: str | None = None) -> Path:
+        """Copy `bin/`, `litellm-proxy/`, and `safehouse/` into a temp repo without `.env`."""
         repo = self.tmp / "repo"
         shutil.copytree(
             REPO_ROOT / "bin",
@@ -182,6 +195,7 @@ sys.exit(0)
         return repo
 
     def test_list_and_unknown_system(self) -> None:
+        """Verify `--list` system discovery and exit code 2 on unknown system names."""
         res = self._run(BIN_DOCTOR, ["--list"])
         self.assertEqual(res.returncode, 0, res.stderr)
         self.assertEqual(
@@ -194,6 +208,7 @@ sys.exit(0)
         self.assertIn("Unknown system(s): does-not-exist", bad.stderr)
 
     def test_litellm_install_doctor_and_drift_repair(self) -> None:
+        """Verify `litellm-proxy` dry-run, seed/sync install, doctor checks, and drift repair."""
         self._install_fake_docker()
         repo = self._make_isolated_repo(repo_env_content=None)
         bin_doctor = repo / "bin" / "doctor"
@@ -414,6 +429,7 @@ sys.exit(0)
             server.server_close()
 
     def test_safehouse_install_and_doctor(self) -> None:
+        """Verify `safehouse` binary/profile/ACP rendering, install, and doctor checks."""
         acp_path = self.home / ".jetbrains" / "acp.json"
         local_profile = self.home / ".config" / "safehouse" / "junie-local.sb"
         wrapper = self.home / "bin" / "junie-safehouse"
@@ -574,6 +590,7 @@ sys.exit(0)
         self.assertEqual(sentinel.read_text(encoding="utf-8"), "keep-me\n")
 
     def test_symlink_replacement_does_not_clobber_target(self) -> None:
+        """Verify replacing a symlinked target swaps atomically without editing its referent."""
         sentinel = self.tmp / "sentinel.txt"
         sentinel.write_text("do-not-overwrite\n", encoding="utf-8")
         target = self.home / "bin" / "junie-safehouse"
@@ -586,6 +603,7 @@ sys.exit(0)
         self.assertEqual(sentinel.read_text(encoding="utf-8"), "do-not-overwrite\n")
 
     def test_custom_system_autodiscovery(self) -> None:
+        """Verify dropping in a new `<system>/` with `manifest` + `hooks/` works automatically."""
         # Build an isolated copy of bin/ plus a custom system to verify extensibility.
         mini_repo = self.tmp / "mini_repo"
         shutil.copytree(REPO_ROOT / "bin", mini_repo / "bin")
@@ -617,6 +635,7 @@ sys.exit(0)
         self.assertIn("custom check ok", doc.stdout)
 
     def test_litellm_bash_profile_edge_cases(self) -> None:
+        """Verify `LITELLM_MASTER_KEY` deduping, updating, and symlink preservation in `~/.bash_profile`."""
         self._install_fake_docker()
         repo = self._make_isolated_repo(repo_env_content=None)
         bin_doctor = repo / "bin" / "doctor"
@@ -747,6 +766,7 @@ sys.exit(0)
             server.server_close()
 
     def test_litellm_repo_env_syncs_and_updates_bash_profile(self) -> None:
+        """Verify repo `.env` `sync-or-seed` behavior and `~/.bash_profile` key updates."""
         self._install_fake_docker()
         initial_env = (
             "LITELLM_MASTER_KEY=sk-initial-key\n"
@@ -858,6 +878,7 @@ sys.exit(0)
             server.server_close()
 
     def test_install_status_line_colors_under_tty(self) -> None:
+        """Verify `Install Status:` uses green/yellow/red ANSI colors when attached to a TTY."""
         mini_repo = self.tmp / "color_repo"
         shutil.copytree(
             REPO_ROOT / "bin",
@@ -916,6 +937,7 @@ sys.exit(0)
         self.assertIn("hooks/post-install failed (exit 1): Error: hook boom", out_both)
 
     def test_doctor_and_install_failed_checks_summary_at_bottom(self) -> None:
+        """Verify `Failed Checks:` groups manifest and hook failures at the end of output."""
         self._install_fake_docker(
             containers=[
                 {"Service": "litellm", "State": "running", "Health": ""},
@@ -989,6 +1011,7 @@ sys.exit(0)
         )
 
     def _fake_mise_script(self, log_path: Path, *, installed_tools: bool = True) -> str:
+        """Generate a stateful `mise` shim supporting tool specs, `env --json`, and `docmancer`."""
         return f"""#!/usr/bin/env python3
 import json
 import os
@@ -1178,6 +1201,7 @@ sys.exit(0)
 """
 
     def test_mise_install_downloads_binary_syncs_bash_profile_and_global_tools(self) -> None:
+        """Verify `mise` downloads `~/bin/mise`, hooks `~/.bash_profile`, and installs tools."""
         mise_log = self.tmp / "mise.log"
         fake_binary_bytes = self._fake_mise_script(mise_log).encode("utf-8")
 
@@ -1331,6 +1355,7 @@ sys.exit(0)
             server.server_close()
 
     def test_docmancer_install_and_doctor(self) -> None:
+        """Verify `docmancer` Mise env wiring and `openai`/`socks` dependency checks."""
         mise_log = self.tmp / "docmancer_mise.log"
         mise_bin = self.home / "bin" / "mise"
         mise_bin.parent.mkdir(parents=True, exist_ok=True)
@@ -1416,6 +1441,7 @@ sys.exit(0)
         self.assertIn("Mise environment missing OPENAI_BASE_URL, OPENAI_API_KEY", doc_no_env.stdout)
 
     def test_junie_install_and_doctor(self) -> None:
+        """Verify `junie` rule compilation, skills sync, and doctor drift/symlink checks."""
         agents_path = self.home / ".junie" / "AGENTS.md"
         skill_path = self.home / ".junie" / "skills" / "personal-voice" / "SKILL.md"
         repo_skill_path = REPO_ROOT / "junie" / "skills" / "personal-voice" / "SKILL.md"
@@ -1519,6 +1545,7 @@ sys.exit(0)
         self.assertEqual(agents_path.read_text(encoding="utf-8"), expected_text)
 
     def test_junie_multiple_rules_concatenation(self) -> None:
+        """Verify `junie/rules/*.md` sort order, blank-file rejection, and empty-dir errors."""
         repo = self.tmp / "junie_repo"
         shutil.copytree(
             REPO_ROOT / "bin",
@@ -1579,6 +1606,7 @@ sys.exit(0)
         self.assertIn("no *.md rule files found", inst_empty.stdout)
 
     def test_safehouse_multiple_policies_concatenation(self) -> None:
+        """Verify `safehouse/policies/*.sb` ordering and empty-policy error handling."""
         repo = self.tmp / "safehouse_repo"
         shutil.copytree(
             REPO_ROOT / "bin",

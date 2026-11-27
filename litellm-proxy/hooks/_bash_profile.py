@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Helpers to verify and sync LITELLM_MASTER_KEY between .env and ~/.bash_profile."""
+"""Helpers to check and sync `LITELLM_MASTER_KEY` between `.env` and `~/.bash_profile`.
+
+`junie-safehouse` passes `LITELLM_MASTER_KEY` into the sandbox from the
+caller's shell env, so keeping `~/.bash_profile` in sync with `.env` keeps
+clients and the Compose stack using the same key.
+"""
 
 from __future__ import annotations
 
@@ -18,7 +23,7 @@ EXPORT_LINE_RE = re.compile(
 
 
 def parse_dotenv(path: Path) -> dict[str, str]:
-    """Parse key=value pairs from a dotenv file."""
+    """Parse `key=value` pairs from a dotenv file (handling optional `export` and quotes)."""
     values: dict[str, str] = {}
     for raw_line in path.read_text(encoding="utf-8").splitlines():
         line = raw_line.strip()
@@ -36,7 +41,7 @@ def parse_dotenv(path: Path) -> dict[str, str]:
 
 
 def _extract_exported_value(rhs: str | None) -> str | None:
-    """Parse the exported value from the right-hand side of an assignment."""
+    """Extract the assigned value from the right-hand side of an `export` line."""
     if rhs is None:
         return None
     stripped = rhs.strip()
@@ -52,7 +57,7 @@ def _extract_exported_value(rhs: str | None) -> str | None:
 
 
 def _atomic_write_text(path: Path, content: str, mode: int) -> None:
-    """Atomically write text to path with the given permission mode."""
+    """Write `content` atomically beside `path` and preserve the target mode."""
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=str(path.parent))
     tmp_path = Path(tmp_name)
@@ -68,7 +73,7 @@ def _atomic_write_text(path: Path, content: str, mode: int) -> None:
 
 
 def _read_master_key(env_path: Path) -> tuple[str | None, str | None]:
-    """Read LITELLM_MASTER_KEY from env_path. Returns (value, error_message)."""
+    """Read `LITELLM_MASTER_KEY` from `env_path`, returning `(value, error_message)`."""
     if not env_path.is_file():
         return None, f"missing {env_path}"
     env_values = parse_dotenv(env_path)
@@ -79,7 +84,7 @@ def _read_master_key(env_path: Path) -> tuple[str | None, str | None]:
 
 
 def _validate_profile_target(profile_path: Path) -> str | None:
-    """Return an error string if profile_path cannot be read/written as a file."""
+    """Return an error if `profile_path` is a broken symlink or a directory."""
     if profile_path.is_symlink() and not profile_path.exists():
         return f"~/.bash_profile is a broken symlink -> {os.readlink(profile_path)}"
     if profile_path.exists() and profile_path.is_dir():
@@ -88,7 +93,7 @@ def _validate_profile_target(profile_path: Path) -> str | None:
 
 
 def check_bash_profile(env_path: Path, profile_path: Path) -> tuple[bool, str]:
-    """Check whether ~/.bash_profile exports LITELLM_MASTER_KEY matching env_path."""
+    """Verify `~/.bash_profile` exports a single `LITELLM_MASTER_KEY` matching `env_path`."""
     master_key, err = _read_master_key(env_path)
     if err is not None:
         return (
@@ -136,7 +141,7 @@ def check_bash_profile(env_path: Path, profile_path: Path) -> tuple[bool, str]:
 
 
 def sync_bash_profile(env_path: Path, profile_path: Path) -> tuple[bool, str]:
-    """Ensure ~/.bash_profile exports LITELLM_MASTER_KEY matching env_path."""
+    """Update or append `export LITELLM_MASTER_KEY` in `~/.bash_profile` (deduping extras)."""
     master_key, err = _read_master_key(env_path)
     if err is not None:
         return (
@@ -209,6 +214,7 @@ def sync_bash_profile(env_path: Path, profile_path: Path) -> tuple[bool, str]:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """CLI entry point for `litellm-proxy/hooks/post-install` (`sync`) and `doctor` (`check`)."""
     args = sys.argv[1:] if argv is None else argv
     action = args[0] if args else "check"
     home = Path.home()

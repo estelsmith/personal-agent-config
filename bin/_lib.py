@@ -1,4 +1,8 @@
-"""Shared helpers for bin/doctor and bin/install."""
+"""Shared plumbing for bin/doctor and bin/install.
+
+I keep this strictly stdlib-only so the CLI works on a bare macOS
+`/usr/bin/python3` before `mise` is even installed.
+"""
 
 from __future__ import annotations
 
@@ -19,7 +23,7 @@ IGNORED_DIRS = {"bin", "tests", "__pycache__"}
 
 @dataclass(frozen=True)
 class System:
-    """A discoverable configuration system under the repository root."""
+    """A discovered top-level system directory (one with a `manifest`, `hooks/`, or both)."""
 
     name: str
     path: Path
@@ -27,6 +31,7 @@ class System:
     hooks_dir: Path | None
 
     def hook(self, hook_name: str) -> Path | None:
+        """Return the path to `hooks/<hook_name>` if it exists."""
         if self.hooks_dir is None:
             return None
         candidate = self.hooks_dir / hook_name
@@ -37,7 +42,7 @@ class System:
 
 @dataclass(frozen=True)
 class ManifestEntry:
-    """A single file mapping declared in a system's manifest."""
+    """Single file mapping parsed from a system's `manifest`."""
 
     mode: int
     source: Path
@@ -48,7 +53,7 @@ class ManifestEntry:
 
 
 class Style:
-    """Minimal ANSI color formatter that disables itself for non-TTYs."""
+    """Minimal ANSI color helper that shuts itself off for pipes or `NO_COLOR`."""
 
     def __init__(self, stream=None) -> None:
         stream = stream or sys.stdout
@@ -83,12 +88,16 @@ class Style:
 
 
 def find_repo_root() -> Path:
-    """Return the repository root directory containing bin/."""
+    """Walk up from `bin/` to find the repo root."""
     return Path(__file__).resolve().parent.parent
 
 
 def discover_systems(repo_root: Path) -> list[System]:
-    """Discover top-level system directories containing a manifest or hooks/."""
+    """Find top-level system directories containing a `manifest` or `hooks/`.
+
+    Systems come back in alphabetical order rather than a dependency graph, which
+    is good enough everywhere except a fresh-machine bootstrap (`mise` before `docmancer`).
+    """
     systems: list[System] = []
     for entry in sorted(repo_root.iterdir(), key=lambda p: p.name):
         if not entry.is_dir():
@@ -113,7 +122,7 @@ def discover_systems(repo_root: Path) -> list[System]:
 
 
 def select_systems(repo_root: Path, requested: Iterable[str]) -> list[System]:
-    """Filter discovered systems by name, raising ValueError on unknown names."""
+    """Filter discovered systems by name, keeping request order and deduplicating."""
     all_systems = discover_systems(repo_root)
     names = list(requested)
     if not names:
@@ -137,7 +146,11 @@ def select_systems(repo_root: Path, requested: Iterable[str]) -> list[System]:
 
 
 def parse_manifest(system: System) -> list[ManifestEntry]:
-    """Parse a system's manifest file into ManifestEntry objects."""
+    """Parse a system's `manifest` into validated `ManifestEntry` items.
+
+    Rejects source paths that escape `<system>/`, resolves `sync-or-seed` pairs
+    up front, and expands `~` and env vars on target paths.
+    """
     if system.manifest_path is None:
         return []
 
@@ -231,7 +244,7 @@ def parse_manifest(system: System) -> list[ManifestEntry]:
 
 
 def sha256_file(path: Path) -> str:
-    """Compute hex SHA-256 digest for a file."""
+    """Compute the hex SHA-256 digest for a file."""
     digest = hashlib.sha256()
     with path.open("rb") as fh:
         while True:
@@ -243,12 +256,12 @@ def sha256_file(path: Path) -> str:
 
 
 def file_mode(path: Path) -> int:
-    """Return permission bits (e.g. 0o644) for path."""
+    """Return permission bits (like `0o644`) for `path`."""
     return stat.S_IMODE(path.stat().st_mode)
 
 
 def format_mode(mode: int) -> str:
-    """Format integer mode as 4-digit octal string."""
+    """Format an integer permission mode as a 4-digit octal string."""
     return f"{mode:04o}"
 
 
@@ -261,7 +274,10 @@ def run_hook(
     indent: str = "  ",
     captured_lines: list[str] | None = None,
 ) -> int:
-    """Execute a system hook script and stream its output indented."""
+    """Run a hook script from `<system>/` and stream its output indented.
+
+    Captures raw lines into `captured_lines` so failed hooks can feed the summary.
+    """
     if not os.access(hook_path, os.X_OK):
         raise PermissionError(f"Hook is not executable: {hook_path}")
 
@@ -286,7 +302,11 @@ def run_hook(
 def extract_hook_failures(
     hook_name: str, rc: int, output_lines: list[str]
 ) -> list[str]:
-    """Extract concise failure descriptions from a failed hook's output."""
+    """Pull `[FAIL]` lines (or a fallback exit line) out of a failed hook's output.
+
+    Surfacing `[FAIL]` lines directly keeps hook errors visible in `Failed Checks:`
+    instead of burying them in earlier output.
+    """
     cleaned = [_ANSI_RE.sub("", line).strip() for line in output_lines]
     fail_lines: list[str] = []
     for line in cleaned:
@@ -312,7 +332,7 @@ def extract_hook_failures(
 def print_failed_checks(
     failures_by_system: list[tuple[str, list[str]]], style: Style
 ) -> None:
-    """Print a bottom summary of failed systems and their failed checks."""
+    """Print the bottom `Failed Checks:` breakdown grouped by system."""
     if not failures_by_system:
         return
     print()

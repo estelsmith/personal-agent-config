@@ -1,22 +1,20 @@
-"""LiteLLM proxy custom callbacks and compatibility patches for Junie.
+"""LiteLLM proxy callbacks and compatibility patches for Junie.
 
-Registered via ``litellm_settings.callbacks: custom_callbacks.proxy_handler_instance``
-in ``config.yaml``. This module addresses three integration gaps when routing Junie
-traffic through LiteLLM's ``anthropic-ladder`` and ``gemini-ladder`` complexity routers:
+Wired in via `litellm_settings.callbacks` in `config.yaml`. I use this hook
+module to plug three gaps when routing Junie through `anthropic-ladder` and
+`gemini-ladder`:
 
-1. **Google GenAI decision-router support**: Upstream LiteLLM's
-   ``GoogleGenAIGenerateContentHandler`` does not implement
-   ``get_structured_messages``, causing ``complexity_router`` to skip decision
-   routing for ``apiType=Google`` (``:generateContent``) requests. Monkey-patching
-   that method allows ``gemini-ladder`` to inspect Google GenAI payloads and route
-   them via ``gemini-decision-1``.
-2. **Junie background side-request routing**: Title-generation and task-summarization
-   side-requests from Junie are intercepted in ``async_pre_call_hook`` and pinned to
-   ``claude-haiku-5-5-low`` so they bypass the decision router and heavier tiers.
-3. **Junie capability-filter stabilization**: Junie's capability-filter side-request
-   asks an LLM to return comma-separated numbers selecting relevant skills/agents.
-   Post-call hooks normalize the output format and ensure any capability explicitly
-   named in the user's request is never omitted by a small/fast model.
+- Google GenAI decision routing: Upstream LiteLLM's
+  `GoogleGenAIGenerateContentHandler` doesn't implement `get_structured_messages`,
+  so `complexity_router` skips routing on `:generateContent` requests. Patching
+  that method lets `gemini-ladder` inspect GenAI payloads and route via
+  `gemini-decision-1`.
+- Side-request pinning: Junie's title and task-summary side-requests get
+  intercepted in `async_pre_call_hook` and pinned to `claude-haiku-5-5-low` so
+  they don't pay decision-router latency or hit heavier tiers.
+- Capability-filter cleanup: Small models sometimes wrap capability-filter
+  selections in prose or drop an agent the user named directly. Post-call hooks
+  strip the extra text and force-include any capability named in the prompt.
 """
 
 import re
@@ -30,26 +28,22 @@ from litellm.llms.gemini.google_genai.guardrail_translation.handler import (
 # ---------------------------------------------------------------------------
 # Google GenAI -> complexity_router compatibility patch
 #
-# Junie's custom Gemini models must use ``apiType: "Google"`` (:generateContent
-# or :streamGenerateContent) rather than ``OpenAICompletion``. On LiteLLM's
-# OpenAI chat surface, ``embeds_thought_signature_in_tool_call_id`` defaults to
-# True and appends a long ``__thought__<base64_signature>`` suffix onto
-# ``tool_call.id``, which breaks Junie's ``spawn_subagent`` tool calls in
-# ``/task-dispatcher`` (while disabling it moves signatures to non-standard
-# fields that fail if stripped on echo). Using ``apiType: "Google"`` keeps
-# Gemini's ``thoughtSignature`` natively inside ``content.parts[]``.
+# Junie's custom Gemini models have to use `apiType: "Google"` (:generateContent
+# or :streamGenerateContent) rather than `OpenAICompletion`. On LiteLLM's
+# OpenAI chat surface, `embeds_thought_signature_in_tool_call_id` defaults to
+# True and appends `__thought__<base64_signature>` onto `tool_call.id`, which
+# breaks Junie's `spawn_subagent` tool calls in `/task-dispatcher` (and turning
+# it off moves signatures into non-standard fields that fail if stripped on echo).
+# Staying on `apiType: "Google"` keeps Gemini's `thoughtSignature` inside
+# `content.parts[]` where it belongs.
 #
-# When a client uses the Google GenAI surface (:generateContent or
-# :streamGenerateContent), requests carry ``contents`` and ``systemInstruction``
-# instead of OpenAI ``messages``. LiteLLM's ComplexityRouter calls
-# ``resolve_structured_messages()``, which dispatches to
-# ``GoogleGenAIGenerateContentHandler.get_structured_messages()``. Upstream
-# LiteLLM leaves that method unimplemented (inherited from BaseTranslation,
-# returning None), which causes ComplexityRouter to log "No messages could be
-# resolved, skipping routing" and bypass ``gemini-decision-1``.
-#
-# Patching ``get_structured_messages`` at import time lets the router read
-# normalized OpenAI-style messages without mutating the outbound GenAI payload.
+# The catch is that GenAI requests carry `contents` and `systemInstruction`
+# instead of OpenAI `messages`. LiteLLM's ComplexityRouter calls
+# `resolve_structured_messages()`, which dispatches to
+# `GoogleGenAIGenerateContentHandler.get_structured_messages()`. Upstream leaves
+# that returning None, causing ComplexityRouter to log "No messages could be
+# resolved, skipping routing" and bypass `gemini-decision-1`. Patching it at
+# import time gives the router normalized messages without mutating the payload.
 # ---------------------------------------------------------------------------
 
 _genai_adapter = GoogleGenAIAdapter()
@@ -86,16 +80,16 @@ GoogleGenAIGenerateContentHandler.get_structured_messages = _google_genai_get_st
 
 
 class TitleRoutingHook(CustomLogger):
-    """LiteLLM proxy hook for Junie side-requests and capability-filter responses.
+    """LiteLLM hook for Junie side-requests and capability-filter cleanup.
 
-    Originally introduced to pin Junie's title/summary side-requests to Haiku
-    (hence the class name, referenced by ``config.yaml``), this hook also cleans
-    up and enforces constraints on Junie's capability-filter responses.
+    Started out just pinning title/summary side-requests to Haiku (which is why
+    `config.yaml` still imports it as `TitleRoutingHook`), and later picked up the
+    capability-filter response guards too.
     """
 
     # System prompt prefixes sent by Junie for lightweight background side-tasks.
-    # Intercepting them avoids paying decision-router classification latency/cost
-    # or accidentally dispatching trivial summaries to higher-tier models.
+    # Intercepting them avoids decision-router latency/cost and prevents trivial
+    # summaries from hitting higher-tier models.
     HAIKU_SYSTEM_PROMPTS = (
         "You are a chat response title creator",
         "You are a programming task description summarizer",
@@ -103,7 +97,7 @@ class TitleRoutingHook(CustomLogger):
 
     @classmethod
     def _matches_haiku_prompt(cls, text: str) -> bool:
-        """Return True if ``text`` belongs to a Junie title/summary side-request."""
+        """Return True if `text` belongs to a Junie title or summary side-request."""
         return any(prompt in text for prompt in cls.HAIKU_SYSTEM_PROMPTS)
 
     # Junie's capability-filter agent prompt presents a numbered markdown list of
@@ -114,18 +108,18 @@ class TitleRoutingHook(CustomLogger):
 
     @staticmethod
     def _message_text(msg) -> str:
-        """Extract plain text from a string or multi-part OpenAI/Anthropic message."""
+        """Pull plain text out of a string or multi-part OpenAI/Anthropic message."""
         content = msg.get("content", "")
         if isinstance(content, list):
             return " ".join(str(p.get("text", "")) for p in content if isinstance(p, dict))
         return str(content or "")
 
     def _forced_capabilities(self, data) -> str | None:
-        """Identify capabilities explicitly named in a capability-filter request.
+        """Find capability IDs explicitly named in a capability-filter prompt.
 
-        Returns a sorted, comma-separated string of capability numbers that must be
-        included in the response (empty string if it *is* a capability-filter request
-        but none were explicitly named), or ``None`` if this is an ordinary request.
+        Returns a sorted comma-separated string of required IDs (empty string when
+        it's a capability-filter request with no explicit names), or `None` for normal
+        traffic.
         """
         messages = data.get("messages") or []
         texts = [self._message_text(m) for m in messages if isinstance(m, dict)]
@@ -147,10 +141,10 @@ class TitleRoutingHook(CustomLogger):
 
     @staticmethod
     def _clean_selection(text: str, forced: str) -> str:
-        """Normalize model output to sorted, comma-separated numbers plus forced IDs.
+        """Normalize capability-filter output to sorted, comma-separated IDs.
 
-        Scans non-empty lines from bottom to top for the final number-list line
-        (discarding any preceding commentary/reasoning) and merges in ``forced``.
+        Walks non-empty lines bottom-up to grab the final number list (dropping
+        preceding commentary), then merges in `forced`.
         """
         lines = [l.strip() for l in (text or "").splitlines() if l.strip()]
         picked = set()
@@ -162,7 +156,7 @@ class TitleRoutingHook(CustomLogger):
         return ",".join(str(n) for n in sorted(picked))
 
     async def async_post_call_success_hook(self, data, user_api_key_dict, response):
-        """Enforce forced capabilities and clean formatting on non-streaming responses."""
+        """Strip extra prose and enforce `forced` capabilities on non-streaming responses."""
         forced = self._forced_capabilities(data)
         if forced is None:
             return response
@@ -173,12 +167,11 @@ class TitleRoutingHook(CustomLogger):
         return response
 
     async def async_post_call_streaming_iterator_hook(self, user_api_key_dict, response, request_data):
-        """Enforce forced capabilities and clean formatting on streaming responses.
+        """Buffer capability-filter streams so we can rewrite and enforce `forced` IDs.
 
-        Because commentary may appear before the final number list and forced IDs
-        must be merged without duplicates, capability-filter streams are buffered
-        until completion, rewritten onto the first content-bearing chunk delta, and
-        then yielded in order to preserve chunk framing and usage/finish metadata.
+        Since a model may emit reasoning before the final number list, we collect the
+        stream, put the cleaned IDs on the first content chunk, and pass remaining
+        chunks through with empty content so finish/usage metadata stays intact.
         """
         forced = self._forced_capabilities(request_data)
         if forced is None:
@@ -203,10 +196,10 @@ class TitleRoutingHook(CustomLogger):
             yield chunk
 
     async def async_pre_call_hook(self, user_api_key_dict, cache, data, call_type):
-        """Route Junie title/summary side-requests directly to ``claude-haiku-5-5-low``.
+        """Pin Junie title and summary side-requests directly to `claude-haiku-5-5-low`.
 
-        Checks both OpenAI/Anthropic ``messages`` system prompts and Google GenAI
-        ``systemInstruction`` / ``system_instruction`` fields (string or parts dict).
+        Checks both OpenAI/Anthropic `messages` system prompts and Google GenAI
+        `systemInstruction` / `system_instruction` payloads.
         """
         for msg in data.get("messages", []):
             if msg.get("role") == "system" and self._matches_haiku_prompt(str(msg.get("content", ""))):

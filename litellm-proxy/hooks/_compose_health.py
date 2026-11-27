@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Helpers to check Docker Compose stack and LiteLLM endpoint health."""
+"""Helpers to check Docker Compose stack and LiteLLM endpoint health.
+
+Shared by `doctor` (which fails on stopped containers) and `post-install`
+(which passes `--fail-prefix` to decide whether to restart Compose).
+"""
 
 from __future__ import annotations
 
@@ -17,7 +21,7 @@ DEFAULT_HEALTH_URL = "http://127.0.0.1:4000/health/liveliness"
 
 
 def parse_compose_ps_json(output: str) -> list[dict]:
-    """Parse JSON array or newline-delimited JSON objects from `docker compose ps`."""
+    """Parse either a JSON array or NDJSON lines from `docker compose ps --format json`."""
     text = output.strip()
     if not text:
         return []
@@ -36,7 +40,11 @@ def parse_compose_ps_json(output: str) -> list[dict]:
 
 
 def check_http_endpoint(url: str, *, fail_prefix: str = "[FAIL]") -> tuple[bool, str]:
-    """Check whether the LiteLLM liveliness HTTP endpoint responds without a 5xx/network error."""
+    """Probe LiteLLM's liveliness URL and accept any non-5xx HTTP response.
+
+    An auth 4xx still proves the proxy is up and serving, whereas 5xx or a
+    connection error means the stack isn't healthy.
+    """
     try:
         with urllib.request.urlopen(url, timeout=3.0) as resp:
             return True, f"[OK] litellm endpoint {url} responded HTTP {resp.status}"
@@ -55,7 +63,7 @@ def check_compose_stack(
     health_url: str | None = None,
     fail_prefix: str = "[FAIL]",
 ) -> tuple[bool, list[str]]:
-    """Verify all Compose services are running/healthy and LiteLLM responds over HTTP."""
+    """Verify every service in `docker-compose.yml` is running/healthy and LiteLLM answers HTTP."""
     if not compose_file.is_file():
         return False, [f"{fail_prefix} missing {compose_file}"]
 
@@ -148,6 +156,7 @@ def check_compose_stack(
 
 
 def main(argv: list[str] | None = None) -> int:
+    """CLI wrapper for checking `~/litellm-proxy` Compose health from shell hooks."""
     parser = argparse.ArgumentParser(
         description="Check litellm-proxy Docker Compose stack health."
     )
