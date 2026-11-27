@@ -28,6 +28,11 @@ Live `bin/install` and `bin/doctor` runs touch real `$HOME` files, rewrite `~/.b
 - **Hook contract:** Hook scripts (`hooks/pre-install`, `hooks/post-install`, `hooks/doctor`) must be executable (`0755`), run with `cwd` set to `<system>/`, and emit failures prefixed with `[FAIL] ` so `extract_hook_failures` surfaces them in the `Failed Checks:` summary.
 - **File writes & line endings:** Preserve LF line endings (`.gitattributes`) and use atomic temp-file writes (`atomic_write_bytes` / `tempfile` + `os.replace`) when updating target files.
 
+## Documentation
+
+- **Always apply `personal-voice`:** Read and apply the `personal-voice` skill for all documentation updates in this repository (like READMEs, `wishlist.md`, docblocks, changelogs, and summaries) without waiting for an explicit request.
+- **Exception for `research/`:** Use the agent-default voice for files under `research/` so they include relevant context that's useful to agents, specifically.
+
 ## Cross-System Coupling & Ordering
 
 `discover_systems()` orders systems **alphabetically** (`docmancer`, `junie`, `litellm-proxy`, `mise`, `safehouse`), which does not match runtime dependency order:
