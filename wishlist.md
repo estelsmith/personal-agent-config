@@ -18,8 +18,7 @@ Random things I want to be consolidated/fixed in my personal agent configuration
   - Don't automatically `install mise` when trying to install dependents. Simply don't allow the dependency to continue to installation if this prerequisite fails.
 - `litellm-proxy` system install exposes the raw `docker compose` ouputs, which streams hundred of lines when downloading/building images.
   - I don't need to see the raw output. Just a summary of what steps are happening. Such as if `litellm-proxy` image downloads, note that a new image was downloaded. Or if a build actually took place, then note that.
-- `safehouse` is not being installed/managed by this repo. It's expected to already exist.
-  - Verify this is true. I'm pretty sure it is.
+- `safehouse` is not being installed/managed by this repo. It's expected to already exist. It should be installed by Mise.
 - I want to get rid of homebrew completely in exchange for Mise.
   - The only hard requirement for my agent config is that Mise be installed. May create a simple `bootstrap.sh` that downloads/installs the latest version to get things going.
 - `litellm-proxy` requires setting `.env` inside of it, and also seeds from `.env.example`.
