@@ -1417,6 +1417,8 @@ sys.exit(0)
 
     def test_junie_install_and_doctor(self) -> None:
         agents_path = self.home / ".junie" / "AGENTS.md"
+        skill_path = self.home / ".junie" / "skills" / "personal-voice" / "SKILL.md"
+        repo_skill_path = REPO_ROOT / "junie" / "skills" / "personal-voice" / "SKILL.md"
         rule_files = sorted(
             (REPO_ROOT / "junie" / "rules").glob("*.md"),
             key=lambda p: p.name,
@@ -1429,35 +1431,53 @@ sys.exit(0)
             )
             + "\n"
         )
+        expected_skill = repo_skill_path.read_text(encoding="utf-8")
 
-        # Pre-install doctor fails because ~/.junie/AGENTS.md is missing.
+        # Personal voice is an on-demand skill, not compiled into global rules.
+        self.assertFalse((REPO_ROOT / "junie" / "rules" / "personal-voice.md").exists())
+        self.assertTrue(repo_skill_path.is_file())
+
+        # Pre-install doctor fails because ~/.junie/AGENTS.md and the skill are missing.
         pre = self._run(BIN_DOCTOR, ["junie"])
         self.assertEqual(pre.returncode, 1)
+        self.assertIn("missing: ~/.junie/skills/personal-voice/SKILL.md", pre.stdout)
         self.assertIn("missing: ~/.junie/AGENTS.md", pre.stdout)
 
-        # Dry run must not create ~/.junie/AGENTS.md.
+        # Dry run must not create ~/.junie/AGENTS.md or ~/.junie/skills/personal-voice/SKILL.md.
         dry = self._run(BIN_INSTALL, ["--dry-run", "junie"])
         self.assertEqual(dry.returncode, 0, dry.stdout + dry.stderr)
         self.assertFalse(agents_path.exists())
+        self.assertFalse(skill_path.exists())
+        self.assertIn("installed=1", dry.stdout)
         self.assertIn("hook=dry-run", dry.stdout)
 
-        # Install creates ~/.junie/AGENTS.md from junie/rules/*.md with mode 0644.
+        # Install creates the personal-voice skill and ~/.junie/AGENTS.md with mode 0644.
         inst = self._run(BIN_INSTALL, ["junie"])
         self.assertEqual(inst.returncode, 0, inst.stdout + inst.stderr)
+        self.assertIn("installed=1", inst.stdout)
+        self.assertIn("[INSTALLED] ~/.junie/skills/personal-voice/SKILL.md", inst.stdout)
         self.assertIn("[INSTALLED] ~/.junie/AGENTS.md", inst.stdout)
+        self.assertTrue(skill_path.is_file())
+        self.assertFalse(skill_path.is_symlink())
+        self.assertEqual(stat.S_IMODE(skill_path.stat().st_mode), 0o644)
+        self.assertEqual(skill_path.read_text(encoding="utf-8"), expected_skill)
         self.assertTrue(agents_path.is_file())
         self.assertFalse(agents_path.is_symlink())
         self.assertEqual(stat.S_IMODE(agents_path.stat().st_mode), 0o644)
         self.assertEqual(agents_path.read_text(encoding="utf-8"), expected_text)
+        self.assertNotIn("Personal Voice & Documentation Style", expected_text)
 
         # Doctor passes now.
         doc_ok = self._run(BIN_DOCTOR, ["junie"])
         self.assertEqual(doc_ok.returncode, 0, doc_ok.stdout + doc_ok.stderr)
+        self.assertIn("[OK] ~/.junie/skills/personal-voice/SKILL.md", doc_ok.stdout)
         self.assertIn("[OK] ~/.junie/AGENTS.md", doc_ok.stdout)
 
         # Re-running install is idempotent.
         reinst = self._run(BIN_INSTALL, ["junie"])
         self.assertEqual(reinst.returncode, 0, reinst.stdout + reinst.stderr)
+        self.assertIn("unchanged=1", reinst.stdout)
+        self.assertIn("[OK] ~/.junie/skills/personal-voice/SKILL.md (unchanged)", reinst.stdout)
         self.assertIn(
             f"[OK] ~/.junie/AGENTS.md (unchanged, {len(rule_files)} rule(s))",
             reinst.stdout,

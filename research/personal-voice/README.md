@@ -1,6 +1,6 @@
 # Personal Voice & Writing Style Research
 
-Analysis of your speaking and writing style across recent Junie sessions, LiteLLM request logs, Gemini Desktop chat transcripts, Google Takeout Gemini Apps history, and repository documentation, paired with the compiled global rule in [`junie/rules/personal-voice.md`](../../junie/rules/personal-voice.md) and local sample tracking in [`samples/README.md`](./samples/README.md).
+Analysis of your speaking and writing style across recent Junie sessions, LiteLLM request logs, Gemini Desktop chat transcripts, Google Takeout Gemini Apps history, and repository documentation, paired with the callable skill in [`junie/skills/personal-voice/SKILL.md`](../../junie/skills/personal-voice/SKILL.md) and local sample tracking in [`samples/README.md`](./samples/README.md).
 
 > **Note on sample archives:** The exported prompt files (`junie-and-litellm-prompts.md`, `gemini-chat-transcript-prompts.md`, `gemini-apps-takeout-prompts.md`, and `running-log.md`) are gitignored via [`samples/.gitignore`](./samples/.gitignore) so personal chat logs stay local on disk rather than in Git history. Sample citations below (e.g., `` `junie-and-litellm-prompts.md` #021 ``) refer to those local archives.
 
@@ -101,7 +101,7 @@ You prefer everyday, mechanical words over abstract terminology:
 
 ## 5. Explicit Documentation, Comment & Formatting Rules
 
-Across the sessions, you gave explicit instructions about how documentation and summaries should be written. These are now encoded in [`junie/rules/personal-voice.md`](../../junie/rules/personal-voice.md):
+Across the sessions, you gave explicit instructions about how documentation and summaries should be written. These are now encoded in [`junie/skills/personal-voice/SKILL.md`](../../junie/skills/personal-voice/SKILL.md):
 
 - **Top-level vs. subsystem README hierarchy (`junie-and-litellm-prompts.md` #113, #334, #335, #345):**
   - Write for a human seeing the repository for the first time (`"geared towards a user running across the repo for the first time"`).
@@ -146,8 +146,8 @@ Across the sessions, you gave explicit instructions about how documentation and 
 - **Generic AI prose:** "**Checkpoint & Resume**: Added robust checkpointing capabilities to [`task-dispatcher`](https://github.com/estelsmith/llm-task-dispatcher) to seamlessly recover from partial runs!"
 - **Target voice:** "- Checkpoint & Resume (PARTIAL Progress): Added workflow checkpointing to [task-dispatcher](https://github.com/estelsmith/llm-task-dispatcher) so interrupted runs can pick back up instead of starting over."
 
-## 8. Applied Rule & Re-evaluation Workflow
+## 8. Applied Skill & Re-evaluation Workflow
 
-- **Active rule file:** [`junie/rules/personal-voice.md`](../../junie/rules/personal-voice.md) now incorporates the full `799`-sample analysis (Junie, LiteLLM, Gemini Desktop transcript, and Google Takeout Gemini Apps). Run `bin/install junie` whenever you are ready to compile and deploy it into `~/.junie/AGENTS.md`.
+- **Active skill file:** [`junie/skills/personal-voice/SKILL.md`](../../junie/skills/personal-voice/SKILL.md) now incorporates the full `799`-sample analysis (Junie, LiteLLM, Gemini Desktop transcript, and Google Takeout Gemini Apps) as an on-demand Junie skill instead of an always-on global rule. Run `bin/install junie` whenever you are ready to sync it to `~/.junie/skills/personal-voice/SKILL.md` (and update `~/.junie/AGENTS.md` without the rule).
 - **Local prompt sample archive:** All `799` clean samples (`junie-and-litellm-prompts.md`, `gemini-chat-transcript-prompts.md`, and `gemini-apps-takeout-prompts.md`) plus `running-log.md` live locally under [`samples/`](./samples/README.md) and are excluded from Git via [`samples/.gitignore`](./samples/.gitignore).
-- **Next refresh:** After appending new entries to `samples/running-log.md` locally, re-run the analysis against those samples whenever you want to refine `junie/rules/personal-voice.md`.
+- **Next refresh:** After appending new entries to `samples/running-log.md` locally, re-run the analysis against those samples whenever you want to refine `junie/skills/personal-voice/SKILL.md`.

@@ -22,6 +22,6 @@ To keep the sample corpus representative of your actual writing and safe to stor
 - **Deduplication:** Identical prompts repeated across retries, mirrored between `~/.junie/sessions/` and `LiteLLM_SpendLogs`, or already exported in `gemini-chat-transcript-prompts.md` were collapsed to a single entry.
 - **Sensitive data redaction:** Third-party email addresses (`[redacted-email]`) and private medication, supplement, substance, and product/share URL references (`[redacted-medication]`, `[redacted-supplement]`, `[redacted-substance]`, `[redacted-provider]`, `[redacted-hormone]`, `[redacted-url]`) were replaced with placeholders while preserving sentence structure and phrasing.
 
-## Re-evaluating `junie/rules/personal-voice.md`
+## Re-evaluating `junie/skills/personal-voice/SKILL.md`
 
-When you add entries to `running-log.md` locally, ask Junie to compare the new samples against [`../README.md`](../README.md) and update `junie/rules/personal-voice.md` with any newly observed patterns, vocabulary, or register shifts.
+When you add entries to `running-log.md` locally, ask Junie to compare the new samples against [`../README.md`](../README.md) and update `junie/skills/personal-voice/SKILL.md` with any newly observed patterns, vocabulary, or register shifts.

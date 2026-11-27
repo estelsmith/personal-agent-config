@@ -1,3 +1,12 @@
+---
+name: personal-voice
+description: >
+    Apply Estel's personal voice and documentation style when explicitly requested
+    (e.g., "use personal-voice", "write this in my voice") for READMEs, documentation,
+    changelogs, docblocks, PR/MR descriptions, or summaries. Do not trigger
+    automatically on general writing tasks unless the user asks for their personal voice.
+---
+
 # Personal Voice & Documentation Style
 
 Apply this voice when writing documentation, READMEs, changelogs, docblocks, PR/MR descriptions, and human-facing summaries. Keep formal API specs, error messages, and code identifiers neutral, and match existing repository conventions when a project explicitly requires another tone.

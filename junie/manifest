@@ -1,2 +1,3 @@
 # <mode> <source> <target> [sync|seed|sync-or-seed]
-# Static ~/.junie/ files can be added here; ~/.junie/AGENTS.md is built from rules/*.md by hooks/post-install.
+# Static ~/.junie/ files and skills live here; ~/.junie/AGENTS.md is built from rules/*.md by hooks/post-install.
+0644 skills/personal-voice/SKILL.md ~/.junie/skills/personal-voice/SKILL.md

@@ -14,7 +14,7 @@ Each top-level directory is an independent **system** handling one part of the s
 | --- | --- | --- | --- |
 | `mise` | Runtime and CLI tool version management. | Keeps runtimes and agent tools pinned and reproducible across interactive shells, IDE subshells, and sandboxed runs without relying on system packages. | [mise/README.md](mise/README.md) |
 | `docmancer` | Local documentation indexing and search. | Lets the agent query curated, up-to-date library docs locally instead of relying on stale training data. | [docmancer/README.md](docmancer/README.md) |
-| `junie` | Global agent rules compiled into Junie's `AGENTS.md`. | Keeps my coding-agent conventions organized in small, version-controlled files and synced consistently across projects. | [junie/README.md](junie/README.md) |
+| `junie` | Global agent rules compiled into Junie's `AGENTS.md` and reusable Junie skills. | Keeps my coding-agent conventions and on-demand skills organized in small, version-controlled files and synced consistently across projects. | [junie/README.md](junie/README.md) |
 | `litellm-proxy` | Local LLM gateway with model routing and request logging. | Provides a single local endpoint, routes turns by complexity to balance cost and quality, and keeps provider API keys out of the agent process. | [litellm-proxy/README.md](litellm-proxy/README.md) |
 | `safehouse` | Sandboxing wrapper for Junie CLI and JetBrains IDE sessions. | Restricts the agent to the active project and explicit tool directories instead of giving it unrestricted access to the rest of the machine. | [safehouse/README.md](safehouse/README.md) |
 

@@ -1,6 +1,6 @@
-# Junie Global Rules
+# Junie Global Rules & Skills
 
-This system compiles my modular Markdown rule files under `junie/rules/` into Junie's global instructions file (`~/.junie/AGENTS.md`) and makes sure the installed copy stays in sync.
+This system compiles my modular Markdown rule files under `junie/rules/` into Junie's global instructions file (`~/.junie/AGENTS.md`), syncs Junie-owned skills via `junie/manifest` (like `personal-voice`), and makes sure the installed copies stay in sync.
 
 ## Why I Use It
 
@@ -10,7 +10,7 @@ Because `hooks/post-install` renders `~/.junie/AGENTS.md` deterministically in s
 
 ## How It Fits In
 
-`~/.junie/AGENTS.md` sets my always-on behavioral baseline across projects, complementing on-demand skills like [`docmancer`](../docmancer/README.md)'s `~/.junie/skills/docmancer/SKILL.md`. Inside [`safehouse`](../safehouse/README.md), `junie-safehouse` mounts `~/.junie` read/write so Junie can read `AGENTS.md`, skills, and session state normally.
+`~/.junie/AGENTS.md` sets my always-on behavioral baseline across projects, while on-demand skills (`~/.junie/skills/personal-voice/SKILL.md` from this system and [`docmancer`](../docmancer/README.md)'s `~/.junie/skills/docmancer/SKILL.md`) only load when a task calls for them. Inside [`safehouse`](../safehouse/README.md), `junie-safehouse` mounts `~/.junie` read/write so Junie can read `AGENTS.md`, skills, and session state normally.
 
 ### Custom Models (`~/.junie/models/`)
 
@@ -21,7 +21,7 @@ Custom Gemini model profiles in `~/.junie/models/` (such as `gemini-ladder.json`
 
 ## How It Works
 
-`junie/manifest` currently holds comments only. Static `~/.junie/` files can be added there later, while `~/.junie/AGENTS.md` is generated dynamically by hooks:
+`junie/manifest` syncs static files and skills directly into `~/.junie/` (currently `skills/personal-voice/SKILL.md` -> `~/.junie/skills/personal-voice/SKILL.md`), while `~/.junie/AGENTS.md` is generated dynamically by hooks:
 
 1. `junie/hooks/_junie.py` collects every non-empty `*.md` file in `junie/rules/` sorted by filename, normalizes line endings, and joins them with blank lines (`\n\n`).
 2. `junie/hooks/post-install` atomically writes the rendered output to `~/.junie/AGENTS.md` (`0644`) whenever the file is missing, is a symlink, or differs in SHA-256 hash or mode.
@@ -30,10 +30,10 @@ Custom Gemini model profiles in `~/.junie/models/` (such as `gemini-ladder.json`
 ## Quick Start
 
 ```bash
-# Render junie/rules/*.md and sync ~/.junie/AGENTS.md
+# Sync junie skills/manifest files, render junie/rules/*.md, and update ~/.junie/AGENTS.md
 bin/install junie
 
-# Verify ~/.junie/AGENTS.md matches junie/rules/*.md
+# Verify ~/.junie/skills/* and ~/.junie/AGENTS.md match the repo
 bin/doctor junie
 ```
 
@@ -42,7 +42,8 @@ bin/doctor junie
 | Path | Role | Details |
 | --- | --- | --- |
 | `junie/rules/*.md` | Source rules | Modular Markdown rule files concatenated in sorted filename order (e.g., `bash-command-intent.md`, `docmancer-first.md`). |
-| `junie/manifest` | Optional static files | Placeholder for any static `~/.junie/` files to sync directly. |
+| `junie/skills/personal-voice/SKILL.md` | On-demand skill | Callable `personal-voice` skill synced to `~/.junie/skills/personal-voice/SKILL.md` for writing docs in my voice when requested. |
+| `junie/manifest` | Static files & skills | Maps static `~/.junie/` files and skills (`0644 skills/personal-voice/SKILL.md ~/.junie/skills/personal-voice/SKILL.md`). |
 | `junie/hooks/post-install` | Build and sync hook | Renders `junie/rules/*.md` into `~/.junie/AGENTS.md` (`0644`). |
 | `junie/hooks/doctor` | Health check hook | Verifies `~/.junie/AGENTS.md` exists as a regular file with matching SHA-256 and `0644` mode. |
 | `junie/hooks/_junie.py` | Shared helper module | Rule discovery, deterministic rendering, atomic writes, and SHA-256/mode checks. |
