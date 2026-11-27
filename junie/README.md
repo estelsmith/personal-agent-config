@@ -18,7 +18,7 @@ Static files and skills sync through `junie/manifest`, while `~/.junie/AGENTS.md
 
 ### Custom Gemini Models (`~/.junie/models/`)
 
-If you add custom Gemini profiles under `~/.junie/models/` (like `gemini-ladder.json` and `litellm-gemini-4-hydrogen-*.json`, currently managed outside this repo), set `apiType: "Google"` instead of `OpenAICompletion`. LiteLLM's OpenAI chat endpoint tacks thought signatures onto tool call IDs, which breaks Junie's subagent spawning (`/task-dispatcher`). Keeping `apiType: "Google"` avoids that, and [`litellm-proxy`](../litellm-proxy/README.md) patches complexity routing to handle native Google payloads.
+If you add custom Gemini profiles under `~/.junie/models/` (like `gemini-ladder.json` and `litellm-gemini-4-hydrogen-*.json`, currently managed outside this repo), set `apiType: "Google"` instead of `OpenAICompletion`. LiteLLM's OpenAI chat endpoint tacks thought signatures onto tool call IDs, which breaks Junie's subagent spawning (`/task-dispatcher`). Keeping `apiType: "Google"` avoids that, and [`litellm-proxy`](../litellm-proxy/README.md) patches both complexity routing and `reasoning_effort` (`thinkingConfig`) propagation for native Google payloads.
 
 ## Quick Start
 

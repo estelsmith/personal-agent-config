@@ -31,9 +31,10 @@ LiteLLM doesn't support the Gemini Decisions API yet, so this sidecar translates
 
 ### Junie Callbacks (`custom_callbacks.py`)
 
-This hooks into LiteLLM to fix three Junie rough edges:
+This hooks into LiteLLM to fix four Junie rough edges:
 
 - **Google `:generateContent` routing:** Lets `complexity_router` inspect native Google payloads instead of skipping routing (since Junie's Gemini profiles need `apiType: "Google"` so subagent spawning works).
+- **Google `:generateContent` `reasoning_effort` propagation:** Wraps `GenerateContentHelper.setup_generate_content_call` so deployment `reasoning_effort` (`low`/`medium`/`high` in `config.yaml`) maps into `generationConfig.thinkingConfig` (`thinkingLevel` or `thinkingBudget`), while preserving client `includeThoughts` and any explicit client thinking overrides.
 - **Side-request pinning:** Catches Junie's background title-creator and task-summary prompts and sends them straight to `claude-haiku-5-5-low`.
 - **Capability-filter cleanup:** Strips trailing commentary from capability-filter responses and makes sure any skill or agent explicitly named in the user prompt stays in the returned list.
 

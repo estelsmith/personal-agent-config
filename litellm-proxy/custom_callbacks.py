@@ -1,7 +1,7 @@
 """LiteLLM proxy callbacks and compatibility patches for Junie.
 
 Wired in via `litellm_settings.callbacks` in `config.yaml`. I use this hook
-module to plug three gaps when routing Junie through `anthropic-ladder` and
+module to plug four gaps when routing Junie through `anthropic-ladder` and
 `gemini-ladder`:
 
 - Google GenAI decision routing: Upstream LiteLLM's
@@ -9,6 +9,13 @@ module to plug three gaps when routing Junie through `anthropic-ladder` and
   so `complexity_router` skips routing on `:generateContent` requests. Patching
   that method lets `gemini-ladder` inspect GenAI payloads and route via
   `gemini-decision-1`.
+- Google GenAI reasoning effort propagation: Upstream LiteLLM's
+  `GoogleGenAIConfig` ignores `litellm_params.reasoning_effort` from
+  `config.yaml` on `:generateContent` calls. Wrapping
+  `GenerateContentHelper.setup_generate_content_call` maps deployment
+  `reasoning_effort` into `generationConfig.thinkingConfig` (`thinkingLevel` or
+  `thinkingBudget`) while preserving client `includeThoughts` and any explicit
+  client thinking overrides.
 - Side-request pinning: Junie's title and task-summary side-requests get
   intercepted in `async_pre_call_hook` and pinned to `claude-haiku-5-5-low` so
   they don't pay decision-router latency or hit heavier tiers.
@@ -17,12 +24,18 @@ module to plug three gaps when routing Junie through `anthropic-ladder` and
   strip the extra text and force-include any capability named in the prompt.
 """
 
+from collections.abc import Mapping
 import re
 
+import litellm
 from litellm.google_genai.adapters.transformation import GoogleGenAIAdapter
+from litellm.google_genai.main import GenerateContentHelper
 from litellm.integrations.custom_logger import CustomLogger
 from litellm.llms.gemini.google_genai.guardrail_translation.handler import (
     GoogleGenAIGenerateContentHandler,
+)
+from litellm.llms.vertex_ai.gemini.vertex_and_google_ai_studio_gemini import (
+    VertexGeminiConfig,
 )
 
 # ---------------------------------------------------------------------------
@@ -77,6 +90,164 @@ def _google_genai_get_structured_messages(self, data: dict):
 
 
 GoogleGenAIGenerateContentHandler.get_structured_messages = _google_genai_get_structured_messages
+
+
+# ---------------------------------------------------------------------------
+# Google GenAI -> reasoning_effort propagation patch
+#
+# On LiteLLM 1.111.0's Google GenAI passthrough (:generateContent and
+# :streamGenerateContent), `GoogleGenAIConfig` only reads `thinkingConfig` /
+# `thinking_config` from the client's `generationConfig` and ignores
+# `litellm_params.reasoning_effort` set per deployment in `config.yaml`. As a
+# result, `gemini-4-hydrogen-low` and `gemini-4-hydrogen-medium` silently run
+# at the model default (`high`) thinking level.
+#
+# Wrapping `GenerateContentHelper.setup_generate_content_call` (the single
+# setup path shared by sync/async and streaming/non-streaming GenAI calls)
+# maps `reasoning_effort` via `VertexGeminiConfig._map_reasoning_effort` into
+# `generationConfig.thinkingConfig` whenever the client did not already pass
+# an explicit `thinkingLevel`/`thinkingBudget`, while preserving any client
+# `includeThoughts` flag (such as Junie's `includeThoughts: false`).
+# ---------------------------------------------------------------------------
+
+_THINKING_BUDGET_OR_LEVEL_KEYS = (
+    "thinkingLevel",
+    "thinking_level",
+    "thinkingBudget",
+    "thinking_budget",
+)
+_GOOGLE_GENAI_REASONING_PROVIDERS = frozenset({"gemini", "vertex_ai", "vertex_ai_beta"})
+
+
+def _extract_reasoning_effort(reasoning_effort: object) -> tuple[str | None, bool]:
+    """Return `(effort, include_thoughts_requested)` from a `reasoning_effort` value."""
+    if isinstance(reasoning_effort, str):
+        effort = reasoning_effort.strip().lower()
+        return (effort or None, False)
+    if isinstance(reasoning_effort, Mapping):
+        raw_effort = reasoning_effort.get("effort")
+        effort = raw_effort.strip().lower() if isinstance(raw_effort, str) else None
+        include_thoughts = isinstance(reasoning_effort.get("summary"), str)
+        return (effort or None, include_thoughts)
+    return (None, False)
+
+
+def _resolve_google_provider(
+    model: str,
+    custom_llm_provider: str | None,
+    kwargs: Mapping[str, object],
+) -> tuple[str, str | None]:
+    """Resolve `(model, custom_llm_provider)` without mutating caller inputs."""
+    if custom_llm_provider is not None:
+        return model, custom_llm_provider
+    try:
+        resolved_model, resolved_provider, _, _ = litellm.get_llm_provider(
+            model=model,
+            custom_llm_provider=custom_llm_provider,
+            api_base=kwargs.get("api_base"),
+            api_key=kwargs.get("api_key"),
+        )
+        return resolved_model, resolved_provider
+    except Exception:
+        return model, custom_llm_provider
+
+
+def _inject_google_thinking_config(
+    *,
+    model: str,
+    config: object,
+    custom_llm_provider: str | None,
+    kwargs: Mapping[str, object],
+):
+    """Map deployment `reasoning_effort` into `generationConfig.thinkingConfig`."""
+    reasoning_effort = kwargs.get("reasoning_effort")
+    if reasoning_effort is None:
+        return config
+
+    effort, summary_requested = _extract_reasoning_effort(reasoning_effort)
+    if effort is None:
+        return config
+
+    resolved_model, resolved_provider = _resolve_google_provider(
+        model, custom_llm_provider, kwargs
+    )
+    if resolved_provider not in _GOOGLE_GENAI_REASONING_PROVIDERS:
+        return config
+
+    if config is None:
+        config_dict = {}
+    elif isinstance(config, Mapping):
+        config_dict = dict(config)
+    else:
+        return config
+
+    existing_tc = config_dict.get("thinkingConfig")
+    if existing_tc is None:
+        existing_tc = config_dict.get("thinking_config")
+
+    if isinstance(existing_tc, Mapping) and any(
+        existing_tc.get(key) is not None for key in _THINKING_BUDGET_OR_LEVEL_KEYS
+    ):
+        return config
+
+    try:
+        mapped_tc = VertexGeminiConfig._map_reasoning_effort(
+            effort=effort,
+            model=resolved_model,
+            reasoning_effort=reasoning_effort,
+        )
+    except Exception:
+        return config
+
+    merged_tc = dict(existing_tc) if isinstance(existing_tc, Mapping) else {}
+    for key in ("thinkingLevel", "thinkingBudget"):
+        if key in mapped_tc:
+            merged_tc[key] = mapped_tc[key]
+
+    has_include_thoughts = "includeThoughts" in merged_tc or "include_thoughts" in merged_tc
+    if not has_include_thoughts and (summary_requested or mapped_tc.get("includeThoughts") is False):
+        merged_tc["includeThoughts"] = mapped_tc["includeThoughts"]
+
+    config_dict.pop("thinking_config", None)
+    config_dict["thinkingConfig"] = merged_tc
+    return config_dict
+
+
+_orig_setup_generate_content_call = getattr(
+    GenerateContentHelper,
+    "_orig_setup_generate_content_call",
+    GenerateContentHelper.setup_generate_content_call,
+)
+GenerateContentHelper._orig_setup_generate_content_call = _orig_setup_generate_content_call
+
+
+@staticmethod
+def _google_genai_setup_generate_content_call(
+    model: str,
+    contents,
+    config=None,
+    custom_llm_provider: str | None = None,
+    tools=None,
+    **kwargs,
+):
+    """Inject deployment `reasoning_effort` as `thinkingConfig` on Google GenAI calls."""
+    config = _inject_google_thinking_config(
+        model=model,
+        config=config,
+        custom_llm_provider=custom_llm_provider,
+        kwargs=kwargs,
+    )
+    return _orig_setup_generate_content_call(
+        model=model,
+        contents=contents,
+        config=config,
+        custom_llm_provider=custom_llm_provider,
+        tools=tools,
+        **kwargs,
+    )
+
+
+GenerateContentHelper.setup_generate_content_call = _google_genai_setup_generate_content_call
 
 
 class TitleRoutingHook(CustomLogger):
